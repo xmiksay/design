@@ -55,10 +55,6 @@ pub async fn serve(workspace: PathBuf) -> anyhow::Result<()> {
     let workspace = workspace
         .canonicalize()
         .with_context(|| format!("workspace not found: {}", workspace.display()))?;
-    // Keep the substrate's compiled tokens current from its DTCG source. This is
-    // why `design <folder>` needs no extra step: the token build is implicit.
-    compile_tokens(&workspace);
-
     let preview_dir = workspace.join("preview");
     if !preview_dir.is_dir() {
         anyhow::bail!(
@@ -192,25 +188,6 @@ fn index_html(state: &AppState) -> Response {
         None => format!("{inject}{html}"),
     };
     ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response()
-}
-
-/// Compile `<workspace>/src/tokens.json` → `<workspace>/src/tokens.css` if the
-/// DTCG source is present. Best-effort: logs and continues on failure so the
-/// server still starts.
-fn compile_tokens(workspace: &Path) {
-    let src = workspace.join("src/tokens.json");
-    if !src.is_file() {
-        return;
-    }
-    let out = workspace.join("src/tokens.css");
-    match std::fs::read_to_string(&src).map_err(anyhow::Error::from).and_then(|json| {
-        let css = crate::core::tokens::compile_str(&json)?;
-        std::fs::write(&out, css)?;
-        Ok(())
-    }) {
-        Ok(()) => tracing::info!(out = %out.display(), "compiled tokens"),
-        Err(err) => tracing::warn!(%err, "token compile skipped"),
-    }
 }
 
 // ---- File browser API ----------------------------------------------------
