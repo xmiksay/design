@@ -1,0 +1,30 @@
+:root {
+  --tool-bg: #15171c;
+  --tool-panel: #1c1f26;
+  --tool-border: #2a2e38;
+  --tool-text: #e7e9ee;
+  --tool-muted: #8b93a3;
+  --tool-accent: #6ee7b7;
+  --tool-accent-ink: #08130d;
+  --tool-danger: #f87171;
+  --tool-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
+  --tool-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--tool-bg);
+  color: var(--tool-text);
+  font-family: var(--tool-sans);
+  -webkit-font-smoothing: antialiased;
+}
