@@ -1,8 +1,10 @@
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, watch, onMounted } from "vue";
 import hljs from "highlight.js";
 import "highlight.js/styles/github-dark.css";
 import FileTree from "./FileTree.vue";
+import Chat from "./Chat.vue";
+import { agentClient } from "./agent.js";
 
 // Bootstrap injected by the server (workspace path, default preview path). Falls
 // back to sensible defaults when running the SPA standalone via `vite dev`.
@@ -97,11 +99,48 @@ async function openFile(path) {
   }
 }
 
-// Prompt box — wired to the runner in Phase 2. Inert for now.
-const prompt = ref("");
-const canRun = computed(() => prompt.value.trim().length > 0);
+// ---- Agent chats ----
+// The backend owns the agent processes; this is just the switcher. Agents
+// survive a page reload (we re-list + re-attach on connect).
+const agents = computed(() => agentClient.state.agents);
+const connected = computed(() => agentClient.state.connected);
+const selectedAgentId = ref(null);
+const newAgentType = ref("claude-code");
 
-onMounted(loadTree);
+async function newChat() {
+  const id = await agentClient.spawn(newAgentType.value);
+  if (id) selectedAgentId.value = id;
+}
+function selectChat(id) {
+  selectedAgentId.value = id;
+}
+function closeChat(id) {
+  agentClient.close(id);
+  if (selectedAgentId.value === id) selectedAgentId.value = null;
+}
+function shortId(id) {
+  return id.slice(0, 8);
+}
+
+// Keep a valid selection as the agent list changes (reload, close, etc.).
+watch(
+  agents,
+  (list) => {
+    const ids = list.map((a) => a.id);
+    if (selectedAgentId.value && !ids.includes(selectedAgentId.value)) {
+      selectedAgentId.value = null;
+    }
+    if (!selectedAgentId.value && ids.length > 0) {
+      selectedAgentId.value = ids[0];
+    }
+  },
+  { deep: true },
+);
+
+onMounted(() => {
+  loadTree();
+  agentClient.connect();
+});
 </script>
 
 <template>
@@ -121,24 +160,40 @@ onMounted(loadTree);
 
     <main class="body">
       <aside class="sidebar">
-        <section class="panel">
-          <h2 class="panel-title">Prompt</h2>
-          <textarea
-            v-model="prompt"
-            class="prompt-input"
-            rows="4"
-            placeholder="Describe the change… (runner lands in Phase 2)"
-          />
-          <button class="run-btn" :disabled="!canRun" title="Runner wired in Phase 2">
-            Run ▸
-          </button>
+        <section class="agent-head">
+          <div class="agent-head-row">
+            <h2 class="panel-title">Agents</h2>
+            <span class="conn" :class="{ on: connected }" :title="connected ? 'connected' : 'disconnected'" />
+          </div>
+          <div class="new-chat">
+            <select v-model="newAgentType" class="agent-select">
+              <option value="claude-code">Claude Code</option>
+            </select>
+            <button class="new-chat-btn" :disabled="!connected" @click="newChat">+ New chat</button>
+          </div>
+          <div v-if="agents.length" class="chat-tabs">
+            <div
+              v-for="a in agents"
+              :key="a.id"
+              class="chat-tab"
+              :class="{ active: a.id === selectedAgentId }"
+              @click="selectChat(a.id)"
+            >
+              <span class="chat-tab-label">{{ a.agentType }} · {{ shortId(a.id) }}</span>
+              <span v-if="a.chats > 1" class="chat-tab-badge" title="active views">{{ a.chats }}</span>
+              <button class="chat-close" title="Close chat (terminates the agent)" @click.stop="closeChat(a.id)">×</button>
+            </div>
+          </div>
         </section>
 
-        <section class="panel grow">
-          <h2 class="panel-title">Changes</h2>
-          <p class="placeholder">
-            Git diff &amp; keep / discard appear here once a run lands a commit.
-          </p>
+        <section class="agent-body">
+          <Chat v-if="selectedAgentId" :key="selectedAgentId" :agent-id="selectedAgentId" />
+          <div v-else class="agent-empty">
+            <p class="placeholder">
+              No chat selected. Start one with <strong>+ New chat</strong> to drive an agent
+              against this workspace.
+            </p>
+          </div>
         </section>
       </aside>
 
@@ -308,7 +363,7 @@ onMounted(loadTree);
 }
 
 .sidebar {
-  width: 300px;
+  width: 380px;
   flex-shrink: 0;
   border-right: 1px solid var(--tool-border);
   background: var(--tool-panel);
@@ -316,53 +371,115 @@ onMounted(loadTree);
   flex-direction: column;
   overflow: hidden;
 }
-.panel {
-  padding: 1rem;
-  border-bottom: 1px solid var(--tool-border);
-}
-.panel.grow {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
 .panel-title {
-  margin: 0 0 0.6rem;
+  margin: 0;
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.14em;
   color: var(--tool-muted);
 }
-.prompt-input {
-  width: 100%;
-  resize: vertical;
+
+/* Agent panel: header (new chat + open chats) above, the conversation below. */
+.agent-head {
+  padding: 0.8rem 0.85rem;
+  border-bottom: 1px solid var(--tool-border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.agent-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.conn {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tool-muted);
+}
+.conn.on {
+  background: var(--tool-accent);
+  box-shadow: 0 0 7px var(--tool-accent);
+}
+.new-chat {
+  display: flex;
+  gap: 0.5rem;
+}
+.agent-select {
+  flex: 1;
   background: var(--tool-bg);
   color: var(--tool-text);
   border: 1px solid var(--tool-border);
-  border-radius: 8px;
-  padding: 0.6rem 0.7rem;
-  font-family: var(--tool-sans);
-  font-size: 0.9rem;
-  line-height: 1.4;
+  border-radius: 7px;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.82rem;
 }
-.prompt-input:focus {
-  outline: none;
-  border-color: var(--tool-accent);
-}
-.run-btn {
-  margin-top: 0.6rem;
-  width: 100%;
+.new-chat-btn {
   background: var(--tool-accent);
   color: var(--tool-accent-ink);
   border: none;
-  border-radius: 8px;
-  padding: 0.55rem;
+  border-radius: 7px;
+  padding: 0.4rem 0.7rem;
   font-weight: 700;
   cursor: pointer;
+  white-space: nowrap;
 }
-.run-btn:disabled {
+.new-chat-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+.chat-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.chat-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--tool-bg);
+  border: 1px solid var(--tool-border);
+  border-radius: 999px;
+  padding: 0.2rem 0.3rem 0.2rem 0.6rem;
+  font-family: var(--tool-mono);
+  font-size: 0.72rem;
+  color: var(--tool-muted);
+  cursor: pointer;
+}
+.chat-tab.active {
+  border-color: var(--tool-accent);
+  color: var(--tool-text);
+}
+.chat-tab-badge {
+  background: var(--tool-accent);
+  color: var(--tool-accent-ink);
+  border-radius: 999px;
+  padding: 0 0.35rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+.chat-close {
+  background: transparent;
+  border: none;
+  color: var(--tool-muted);
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0 0.15rem;
+  border-radius: 50%;
+}
+.chat-close:hover {
+  color: var(--tool-danger);
+}
+.agent-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.agent-empty {
+  padding: 1rem 0.85rem;
 }
 .placeholder {
   font-size: 0.85rem;

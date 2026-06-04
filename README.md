@@ -16,8 +16,8 @@ or discard, and push by hand.
 The shareable artifact is the **repo**, not the tool. `design` is a disposable,
 dev-server-class driver. The core invariant: the repo stays workable by anyone —
 any agent, any LLM, or by hand — so the tool is always a convenience, never a
-dependency. The substrate builds itself with plain `npm run build`; `design` just
-serves it and (later) brokers prompts to a runner.
+dependency. The substrate is buildless — `npm run tokens` only compiles the DTCG
+tokens to CSS; `design` just serves it and brokers prompts to an agent.
 
 ## Status
 
@@ -38,8 +38,9 @@ Phase 1 is in place: the CLI, the localhost server, and the driver SPA.
 Three separable concerns:
 
 - **Substrate** — the design-system repo being edited. Open formats only: DTCG
-  token JSON, JSX page components, plain HTML/CSS. Carries the "any agent"
-  promise. `example/` is a working sample.
+  token JSON, native Web Components, plain HTML/CSS. Buildless — `npm run tokens`
+  just compiles the tokens. Carries the "any agent" promise. `example/` is a
+  working sample.
 - **Server** — localhost-only Axum server. Serves the embedded SPA and the
   workspace files, and (Phase 2) brokers prompt → runner.
 - **Runner** — turns *(workspace + prompt)* into *(event stream + git diff +
@@ -54,8 +55,9 @@ src/
   server.rs       # Axum server: security, file APIs, static serving
   embed.rs        # rust-embed of the built SPA (ui/dist)
 ui/               # Vue 3 + Vite driver SPA (embedded into the binary)
-example/          # sample substrate: JSX components + DTCG tokens
-  dtcg.js         # DTCG → CSS compiler (substrate-owned, runs in Vite)
+example/          # sample substrate: Web Components + DTCG tokens
+  dtcg.js         # DTCG → CSS compiler (substrate-owned)
+  build.mjs       # zero-dep Node runner for it (`npm run tokens`)
   src/tokens.json # design tokens (source of truth)
 ```
 
@@ -67,15 +69,15 @@ example/          # sample substrate: JSX components + DTCG tokens
 ## Build & run
 
 The SPA is embedded into the binary at compile time, so build it **before**
-`cargo build`. The sample substrate must also be built so there is a `preview/`
-to serve.
+`cargo build`. The sample substrate is buildless (its `preview/` pages are
+authored, not generated), but its `src/tokens.css` is compiled from the tokens.
 
 ```sh
 # 1. Build the driver SPA (produces ui/dist, embedded by rust-embed)
 cd ui && npm install && npm run build && cd ..
 
-# 2. Build the sample substrate (produces example/preview + tokens)
-cd example && npm install && npm run build && cd ..
+# 2. Compile the sample substrate's tokens (produces example/src/tokens.css)
+cd example && npm run tokens && cd ..
 
 # 3. Build and run the tool
 cargo build

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Design system — overview</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../src/tokens.css" />
+    <link rel="stylesheet" href="../src/styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <ds-navbar id="nav" brand="Atelier"></ds-navbar>
+
+      <div class="section">
+        <ds-hero
+          eyebrow="Agent-neutral design system"
+          heading="Tokens in, components out."
+          subhead="A starter substrate of native Web Components, themed entirely from DTCG design tokens. Edit a token, recompile, refresh — every component follows."
+        >
+          <a href="components.html" slot="actions" style="text-decoration:none"><ds-button>Browse components</ds-button></a>
+          <a href="layout.html" slot="actions" style="text-decoration:none"><ds-button variant="ghost">View layout</ds-button></a>
+        </ds-hero>
+      </div>
+
+      <h2>Where to look</h2>
+      <div class="grid">
+        <ds-card eyebrow="Output" heading="Components">
+          Every component rendered on its own with mock data — the gallery.
+          Open <code>components.html</code>.
+        </ds-card>
+        <ds-card eyebrow="Output" heading="Layout">
+          The components composed into one realistic page. Open
+          <code>layout.html</code>.
+        </ds-card>
+        <ds-card eyebrow="Source of truth" heading="Tokens">
+          All visual values come from <code>src/tokens.json</code>, compiled to
+          <code>src/tokens.css</code> as CSS custom properties.
+        </ds-card>
+      </div>
+
+      <ds-footer id="footer"></ds-footer>
+    </main>
+
+    <script type="module" src="../src/main.js"></script>
+  </body>
+</html>

@@ -3,17 +3,8 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Agent-neutral design system — JSX page components, themed by DTCG tokens",
+  "description": "Agent-neutral design system — native Web Components, themed by DTCG tokens. No build step; node is used only to compile tokens.",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build"
-  },
-  "dependencies": {
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-react": "^6.0.2",
-    "vite": "^8.0.16"
+    "tokens": "node build.mjs"
   }
 }

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Design system — layout</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../src/tokens.css" />
+    <link rel="stylesheet" href="../src/styles.css" />
+    <style>
+      .shell { display: grid; grid-template-columns: auto 1fr; gap: var(--space-xl); align-items: start; }
+      @media (max-width: 52rem) { .shell { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <ds-navbar id="nav" brand="Atelier"></ds-navbar>
+
+      <div class="section">
+        <ds-breadcrumb id="crumbs"></ds-breadcrumb>
+      </div>
+
+      <div class="section">
+        <ds-hero
+          eyebrow="Dashboard"
+          heading="Good afternoon, Mara."
+          subhead="Here's how the shop is doing this week."
+        >
+          <ds-button slot="actions">New order</ds-button>
+          <ds-button slot="actions" variant="ghost">Export</ds-button>
+        </ds-hero>
+      </div>
+
+      <div class="section grid" id="stats"></div>
+
+      <div class="section shell">
+        <ds-sidebar id="sidebar" heading="Atelier"></ds-sidebar>
+        <div class="stack">
+          <ds-table id="orders"></ds-table>
+          <div class="cols-2">
+            <ds-tabs id="tabs"></ds-tabs>
+            <ds-accordion id="faq"></ds-accordion>
+          </div>
+          <ds-alert variant="info" heading="Tip">
+            Edit <code>src/tokens.json</code>, recompile, and this whole page re-themes.
+          </ds-alert>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Plans</h2>
+        <div class="cols-2" id="pricing"></div>
+      </div>
+
+      <div class="section">
+        <ds-testimonial id="quote"></ds-testimonial>
+      </div>
+
+      <ds-footer id="footer"></ds-footer>
+    </main>
+
+    <script type="module" src="../src/layout.js"></script>
+  </body>
+</html>

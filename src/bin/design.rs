@@ -13,6 +13,31 @@ struct Cli {
     /// Path to the design-system workspace to serve.
     #[arg(default_value = ".")]
     path: PathBuf,
+
+    /// Tool-permission rule pre-approved for spawned agents (repeatable, e.g.
+    /// `--allow Read --allow "Bash(npm *)"`). Anything outside the set prompts
+    /// in the chat. Passed through to Claude Code's `--allowedTools`.
+    #[arg(long = "allow", value_name = "RULE")]
+    allow: Vec<String>,
+}
+
+/// Sensible default allowlist when the user passes no `--allow` rules: read-only
+/// inspection plus edits and the common build/VCS-status commands a design loop
+/// needs. Anything else (arbitrary Bash, git mutations, …) prompts in the chat.
+fn default_allow() -> Vec<String> {
+    [
+        "Read",
+        "Glob",
+        "Grep",
+        "Edit",
+        "Write",
+        "Bash(npm run *)",
+        "Bash(git status*)",
+        "Bash(git diff*)",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
 }
 
 fn main() -> anyhow::Result<()> {
@@ -24,8 +49,13 @@ fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
+    let allowed = if cli.allow.is_empty() {
+        default_allow()
+    } else {
+        cli.allow
+    };
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(design::server::serve(cli.path))
+    runtime.block_on(design::server::serve(cli.path, allowed))
 }

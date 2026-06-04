@@ -5,5 +5,6 @@
 //! substrate's own build, so the tool only concerns itself with serving and
 //! (later) driving the runner.
 
+pub mod agent;
 pub mod embed;
 pub mod server;

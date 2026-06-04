@@ -1,4 +1,6 @@
-/* Base + component styles, all values sourced from the DTCG token CSS vars. */
+/* Page chrome only — component visuals live inside each component's shadow DOM.
+   Everything here is the document-level scaffold (layout, typography, the gallery
+   specimen frame), and every value is sourced from the DTCG token CSS vars. */
 
 body {
   margin: 0;
@@ -9,15 +11,17 @@ body {
 }
 
 .page {
-  max-width: 64rem;
+  max-width: 72rem;
   margin: 0 auto;
   padding: var(--space-xl) var(--space-lg);
 }
+
 .page__header {
   border-bottom: var(--border-bold) solid var(--color-ink);
   padding-bottom: var(--space-md);
   margin-bottom: var(--space-xl);
 }
+
 .kicker {
   text-transform: uppercase;
   letter-spacing: 0.22em;
@@ -26,6 +30,7 @@ body {
   color: var(--color-accent);
   margin: 0 0 var(--space-xs);
 }
+
 h1 {
   font-family: var(--font-display);
   font-weight: 600;
@@ -39,87 +44,53 @@ h2 {
   font-size: var(--size-step-1);
   margin: var(--space-xl) 0 var(--space-md);
 }
+p.lead {
+  font-size: var(--size-step-1);
+  line-height: 1.5;
+  color: var(--color-muted);
+  max-width: 52ch;
+}
+a { color: var(--color-accent); }
+
 code {
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono, ui-monospace, Menlo, monospace);
   font-size: 0.92em;
-  background: rgba(0, 0, 0, 0.05);
+  background: rgba(255, 255, 255, 0.06);
   padding: 0.05em 0.3em;
   border-radius: 4px;
 }
 
-.row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-md);
-  align-items: center;
-}
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
-  gap: var(--space-lg);
-}
+/* Layout helpers */
+.row { display: flex; flex-wrap: wrap; gap: var(--space-md); align-items: center; }
+.stack { display: grid; gap: var(--space-md); }
+.grid { display: grid; gap: var(--space-lg); grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+.cols-2 { display: grid; gap: var(--space-lg); grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); }
+.section { margin-top: var(--space-2xl); }
 
-/* Button */
-.ds-button {
-  font-family: var(--font-body);
-  font-size: var(--size-step-0);
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  padding: var(--space-sm) var(--space-lg);
-  border-radius: var(--radius-sm);
-  border: var(--border-bold) solid var(--button-bg);
-  background: var(--button-bg);
-  color: var(--button-fg);
-  cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease;
-}
-.ds-button:hover {
-  transform: translateY(-1px);
-  box-shadow: 3px 3px 0 var(--color-ink);
-}
-.ds-button:active {
-  transform: translateY(0);
-  box-shadow: 1px 1px 0 var(--color-ink);
-}
-.ds-button--ghost {
-  background: transparent;
-  color: var(--button-bg-ghost);
-  border-color: var(--color-line);
-}
-.ds-button--ghost:hover {
-  border-color: var(--button-bg-ghost);
-}
-.ds-button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-}
-
-/* Card */
-.ds-card {
-  background: var(--color-surface);
+/* Gallery — one labelled specimen frame per component */
+.specimens { display: grid; gap: var(--space-xl); }
+.specimen {
   border: var(--border-hairline) solid var(--color-line);
   border-radius: var(--radius-md);
-  padding: var(--space-lg);
+  overflow: hidden;
+  background: var(--color-bg);
 }
-.ds-card__eyebrow {
-  text-transform: uppercase;
-  letter-spacing: 0.18em;
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: var(--color-accent);
-  margin: 0 0 var(--space-sm);
+.specimen__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-surface-2);
+  border-bottom: var(--border-hairline) solid var(--color-line);
 }
-.ds-card__heading {
-  font-family: var(--font-display);
-  font-size: var(--size-step-2);
-  font-weight: 600;
-  line-height: 1.1;
-  margin: 0 0 var(--space-sm);
+.specimen__name { font-family: var(--font-mono, monospace); font-size: var(--size-step--1); color: var(--color-ink); font-weight: 600; }
+.specimen__desc { font-size: var(--size-step--1); color: var(--color-muted); }
+.specimen__stage {
+  padding: var(--space-xl) var(--space-lg);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-lg);
+  align-items: center;
 }
-.ds-card__body {
-  font-size: var(--size-step-0);
-  line-height: 1.55;
-  color: var(--color-muted);
-}
+.specimen__stage--block { display: block; }

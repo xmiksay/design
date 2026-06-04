@@ -23,12 +23,18 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Phase 1 — CLI + localhost server
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "fs"] }
-axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "fs", "process", "sync", "io-util", "time"] }
+axum = { version = "0.8", features = ["ws"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["fs"] }
 rust-embed = "8"
 mime_guess = "2"
 uuid = { version = "1", features = ["v4"] }
+
+# Phase 2 — agent session manager (WebSocket relay to spawned agents)
+futures-util = "0.3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]

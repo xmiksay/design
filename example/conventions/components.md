@@ -31,7 +31,26 @@ class DsThing extends HTMLElement {
 customElements.define("ds-thing", DsThing);
 ```
 
+## Data
+
+Attributes and `<slot>`s cover simple, declarative content. For **array or object
+data** (table rows, accordion panels, nav links) expose a JS **property** instead —
+`el.items = […]`, `el.data = {…}` — and re-render in its setter. Keep a matching
+getter so the value round-trips.
+
 ## Previewing
 
-Add a usage example to `preview/index.html` and import the component module there.
-The preview page is what the live view renders.
+There is no build. The pages in `preview/` are plain HTML served as-is; each loads
+tokens + page CSS via `<link>` and its components via a native ES-module
+`<script type="module">`. Three outputs:
+
+- `preview/index.html` (`src/main.js`) — the landing/overview page.
+- `preview/components.html` (`src/gallery.js`) — the gallery: one labelled specimen
+  per component, each fed with mock data.
+- `preview/layout.html` (`src/layout.js`) — the components composed into one
+  realistic page.
+
+When you add a component: register it in `components/index.js`, give it sample
+values in `src/mock.js`, and add a specimen to `src/gallery.js` (place it on
+`preview/layout.html` too if it belongs in the composed view). No bundler step —
+just reload the page.

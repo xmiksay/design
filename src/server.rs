@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use axum::body::Body;
-use axum::extract::{Query, State};
+use axum::extract::{Query, State, WebSocketUpgrade};
 use axum::http::{header, HeaderValue, Request, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -24,6 +24,7 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tower_http::services::ServeDir;
 
+use crate::agent::AgentManager;
 use crate::embed::Spa;
 
 const COOKIE_NAME: &str = "design_token";
@@ -47,18 +48,24 @@ struct AppState {
     root: Arc<PathBuf>,
     /// Display string for the workspace path (shown in the SPA).
     workspace_label: String,
+    /// Live agent processes, keyed by UUID (decoupled from sockets).
+    agents: AgentManager,
 }
 
 /// Run the server against `workspace` until Ctrl-C. Binds a random loopback port
-/// and prints the tokenized URL to open.
-pub async fn serve(workspace: PathBuf) -> anyhow::Result<()> {
+/// and prints the tokenized URL to open. `allowed` is the tool-permission rule
+/// set pre-approved for spawned agents (passed through to `--allowedTools`).
+pub async fn serve(workspace: PathBuf, allowed: Vec<String>) -> anyhow::Result<()> {
     let workspace = workspace
         .canonicalize()
         .with_context(|| format!("workspace not found: {}", workspace.display()))?;
-    let preview_dir = workspace.join("preview");
-    if !preview_dir.is_dir() {
-        anyhow::bail!(
-            "no preview/ in workspace {} — build it first (cd <workspace> && npm run build)",
+    // The tool is folder-agnostic — any directory works. `preview/index.html` is
+    // only the *default* live-view address (the address bar is editable), so a
+    // missing preview/ is a hint, not an error.
+    if !workspace.join("preview").is_dir() {
+        tracing::warn!(
+            "no preview/ in {} — the live view defaults to preview/index.html; \
+             point the address bar at whatever you want to preview",
             workspace.display()
         );
     }
@@ -69,6 +76,9 @@ pub async fn serve(workspace: PathBuf) -> anyhow::Result<()> {
     let port = listener.local_addr()?.port();
     let token = uuid::Uuid::new_v4().simple().to_string();
 
+    let root = Arc::new(workspace.clone());
+    let agents = AgentManager::new(root.clone(), Arc::new(allowed));
+
     let state = AppState {
         token: token.clone(),
         origins: vec![
@@ -76,13 +86,18 @@ pub async fn serve(workspace: PathBuf) -> anyhow::Result<()> {
             format!("http://localhost:{port}"),
         ],
         hosts: vec![format!("127.0.0.1:{port}"), format!("localhost:{port}")],
-        root: Arc::new(workspace.clone()),
+        root,
         workspace_label: workspace.display().to_string(),
+        agents: agents.clone(),
     };
 
     let app = Router::new()
         .route("/api/tree", get(tree_handler))
         .route("/api/file", get(file_handler))
+        .route("/api/agents", get(agents_handler))
+        // Multiplexed agent channel. Behind the security layer (below), so the
+        // upgrade is authenticated by the same cookie/token + Host/Origin gate.
+        .route("/ws", get(ws_handler))
         // Raw workspace files served with their guessed mime: this is what the
         // live-view iframe points at, so any file (e.g. preview/index.html) can
         // be used as an address. ServeDir confines access to the workspace root.
@@ -99,6 +114,9 @@ pub async fn serve(workspace: PathBuf) -> anyhow::Result<()> {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .context("server error")?;
+
+    // Reap every spawned agent (and its tool subprocesses) on exit.
+    agents.kill_all();
     tracing::info!("server stopped");
     Ok(())
 }
@@ -188,6 +206,20 @@ fn index_html(state: &AppState) -> Response {
         None => format!("{inject}{html}"),
     };
     ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response()
+}
+
+// ---- Agent API -----------------------------------------------------------
+
+/// GET `/api/agents` — JSON list of live agents (mirrors the WS `agents` frame
+/// for first paint before the socket opens).
+async fn agents_handler(State(state): State<AppState>) -> Response {
+    Json(state.agents.list_json()).into_response()
+}
+
+/// GET `/ws` — upgrade to the multiplexed agent channel. Already authenticated
+/// by the `security` layer (cookie/token + Host/Origin) on the handshake.
+async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+    ws.on_upgrade(move |socket| crate::agent::serve_socket(socket, state.agents))
 }
 
 // ---- File browser API ----------------------------------------------------
