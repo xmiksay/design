@@ -7,84 +7,112 @@ A locally-run CLI that serves a small web app for driving a code agent against a
 design ./my-design-system
 ```
 
-You open the printed `http://127.0.0.1:…` URL, browse the workspace, watch a live
-preview, and (soon) prompt an agent to make changes — then review the diff, keep
-or discard, and push by hand.
+You open the printed `http://127.0.0.1:…` URL, chat with an agent that edits the
+workspace, run shell commands, browse files, and watch a live preview — all
+against a repo that stays workable without the tool.
 
 ## The idea
 
 The shareable artifact is the **repo**, not the tool. `design` is a disposable,
 dev-server-class driver. The core invariant: the repo stays workable by anyone —
 any agent, any LLM, or by hand — so the tool is always a convenience, never a
-dependency. The substrate is buildless — `npm run tokens` only compiles the DTCG
-tokens to CSS; `design` just serves it and brokers prompts to an agent.
+dependency.
+
+To keep that promise, **the tool is folder-agnostic**: it imposes no substrate
+format and runs no substrate build. It points at any directory, serves its
+files, and brokers prompts to an agent. `example/` is just one sample design
+system (DTCG token JSON + native Web Components) — a suggestion, not a contract.
 
 ## Status
 
-Phase 1 is in place: the CLI, the localhost server, and the driver SPA.
+The CLI, the localhost server, the driver SPA, and the agent connection are all
+in place. Only the git-diff review view remains.
 
 - ✅ `design <folder>` — loopback-only server, random port, per-launch token,
   Host + Origin checks
-- ✅ Driver SPA (Vue) embedded into the binary, with three windows:
-  **File browser**, **File preview** (syntax highlighted), and **Live preview**
-  (an iframe with an editable address)
+- ✅ Driver SPA (Vue) embedded into the binary, top-tabbed:
+  **Chat**, **Console**, **File browser**, **File preview** (syntax
+  highlighted), and **Live preview** (an iframe with an editable address)
 - ✅ File APIs: workspace tree, file read (path-traversal safe), raw file serving
-- ⏳ **Runner** (Phase 2) — the Prompt box is present but inert; wiring it to
-  Claude Code headless is the next step
-- ⏳ Git diff / keep-discard view (Phase 3)
+- ✅ **Agent connection** — a session manager owns long-lived agent processes
+  keyed by UUID, multiplexed over `/ws`; closing the browser detaches (the agent
+  keeps running), and the Vue chat speaks Claude Code stream-json and answers
+  permission prompts
+- ✅ **Console** — runs `bash -lc <command>` in the workspace, streamed over the
+  same socket
+- ⏳ Git diff / keep-discard review of agent changes (the "Changes" view)
 
 ## Architecture
 
-Three separable concerns:
+Two separable concerns:
 
-- **Substrate** — the design-system repo being edited. Open formats only: DTCG
-  token JSON, native Web Components, plain HTML/CSS. Buildless — `npm run tokens`
-  just compiles the tokens. Carries the "any agent" promise. `example/` is a
-  working sample.
-- **Server** — localhost-only Axum server. Serves the embedded SPA and the
-  workspace files, and (Phase 2) brokers prompt → runner.
-- **Runner** — turns *(workspace + prompt)* into *(event stream + git diff +
-  commit)*. A `Runner` trait with a Claude Code headless impl. *Not yet built.*
+- **The tool** — a single Rust crate: a loopback-only Axum server that serves the
+  embedded SPA, the workspace files, and a WebSocket that brokers agent sessions
+  and console commands. Disposable; it never touches the substrate's build.
+- **The substrate** — the design-system repo being edited. Whatever the user's
+  folder is. It owns its own build (if any); the tool only reads and serves it.
+  `example/` is a working sample (Web Components themed by DTCG tokens, compiled
+  with `npm run tokens`), but nothing in the tool assumes that shape.
+
+The backend is a **pure byte relay**: it owns agent process lifecycles but never
+parses stream-json. The SPA owns the protocol.
 
 ## Repo layout
 
 ```
-src/
-  bin/design.rs   # CLI entry (single positional: the workspace folder)
-  lib.rs          # library root
-  server.rs       # Axum server: security, file APIs, static serving
-  embed.rs        # rust-embed of the built SPA (ui/dist)
-ui/               # Vue 3 + Vite driver SPA (embedded into the binary)
-example/          # sample substrate: Web Components + DTCG tokens
-  dtcg.js         # DTCG → CSS compiler (substrate-owned)
-  build.mjs       # zero-dep Node runner for it (`npm run tokens`)
-  src/tokens.json # design tokens (source of truth)
+src/                # the tool (single crate, logic in the library)
+  bin/design.rs     # CLI entry (positional workspace folder + --allow rules)
+  lib.rs            # library root
+  server.rs         # Axum: security, file APIs, /ws, static serving
+  agent.rs          # session manager: long-lived agent processes keyed by UUID
+  console.rs        # bash command runner streamed over /ws
+  embed.rs          # rust-embed of the built SPA (ui/dist)
+ui/                 # Vue 3 + Vite driver SPA (embedded into the binary)
+  src/agent.js      # WS client
+  src/Chat.vue      # stream-json parser + chat UI + permission prompts
+  src/Console.vue   # console UI
+example/            # sample substrate: Web Components + DTCG tokens
+  dtcg.js           # DTCG → CSS compiler (substrate-owned)
+  build.mjs         # zero-dep Node runner for it (`npm run tokens`)
+  src/tokens.json   # design tokens (source of truth)
 ```
 
 ## Prerequisites
 
 - Rust (stable) + Cargo
 - Node + npm
+- [Claude Code](https://claude.com/claude-code) CLI on `PATH` (for the agent chat)
 
 ## Build & run
 
 The SPA is embedded into the binary at compile time, so build it **before**
-`cargo build`. The sample substrate is buildless (its `preview/` pages are
-authored, not generated), but its `src/tokens.css` is compiled from the tokens.
+`cargo build`. The sample substrate is buildless apart from compiling its tokens.
 
 ```sh
 # 1. Build the driver SPA (produces ui/dist, embedded by rust-embed)
 cd ui && npm install && npm run build && cd ..
 
-# 2. Compile the sample substrate's tokens (produces example/src/tokens.css)
+# 2. (sample only) compile the substrate's tokens → example/src/tokens.css
 cd example && npm run tokens && cd ..
 
-# 3. Build and run the tool
+# 3. Build and run the tool against any folder
 cargo build
 ./target/debug/design ./example
 ```
 
 Open the printed URL. Ctrl-C stops the server cleanly.
+
+### Agent permissions
+
+Spawned agents run with `--permission-mode default` and a pre-approved tool set.
+The default allowlist covers read-only inspection plus edits and the common
+build/VCS-status commands a design loop needs; anything else prompts in the chat.
+Override it with repeatable `--allow` rules (passed through to Claude Code's
+`--allowedTools`):
+
+```sh
+design ./my-design-system --allow Read --allow Edit --allow "Bash(npm *)"
+```
 
 ## Security model
 
@@ -96,6 +124,8 @@ The server is the only new attack surface, so it ships locked down from day one:
 - `Host` and `Origin` headers are validated against the loopback authority to
   block DNS-rebinding and cross-site requests.
 - File reads are confined to the workspace root (path-traversal rejected).
+- `/ws` and the agent/console routes sit behind the same middleware — nothing
+  bypasses the token + Host/Origin checks.
 
 ## License
 
