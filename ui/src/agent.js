@@ -21,6 +21,8 @@ function makeClient() {
   let reconnectTimer = null;
   // id → Set<fn(frame)>: per-agent output subscribers (Chat.vue instances).
   const outputSubs = new Map();
+  // Console output subscribers (Console.vue).
+  const consoleSubs = new Set();
   // ids we want to stay attached to, so we can re-attach after a reconnect.
   const wanted = new Set();
   // one-shot resolvers waiting for the next `spawned` frame.
@@ -97,6 +99,10 @@ function makeClient() {
         if (subs) for (const fn of subs) fn(frame);
         break;
       }
+      case "console.output":
+      case "console.exit":
+        for (const fn of consoleSubs) fn(frame);
+        break;
       case "error":
         // Surface protocol errors on the console; Chat shows agent-level issues.
         console.warn("[agent]", frame.message);
@@ -156,7 +162,33 @@ function makeClient() {
     send({ op: "list" });
   }
 
-  return { state, connect, spawn, attach, detach, close, input, onOutput, refresh };
+  // ---- console ----
+
+  function consoleRun(command) {
+    send({ op: "console.run", command });
+  }
+  function consoleKill() {
+    send({ op: "console.kill" });
+  }
+  function onConsole(fn) {
+    consoleSubs.add(fn);
+    return () => consoleSubs.delete(fn);
+  }
+
+  return {
+    state,
+    connect,
+    spawn,
+    attach,
+    detach,
+    close,
+    input,
+    onOutput,
+    refresh,
+    consoleRun,
+    consoleKill,
+    onConsole,
+  };
 }
 
 // Single shared instance for the whole SPA.

@@ -4,6 +4,7 @@ import hljs from "highlight.js";
 import "highlight.js/styles/github-dark.css";
 import FileTree from "./FileTree.vue";
 import Chat from "./Chat.vue";
+import Console from "./Console.vue";
 import { agentClient } from "./agent.js";
 
 // Bootstrap injected by the server (workspace path, default preview path). Falls
@@ -12,9 +13,9 @@ const boot = window.__DESIGN__ ?? {};
 const workspace = ref(boot.workspace ?? "(dev) ui/");
 const defaultPath = boot.previewPath ?? "preview/index.html";
 
-// The right pane is a set of three tabbed "windows", in order:
-// files (browser) · content (file preview) · preview (live preview).
-const activeTab = ref("files");
+// Tabbed "windows", in order: chat · console · files (browser) ·
+// content (file preview) · preview (live preview).
+const activeTab = ref("chat");
 
 // Live preview: an editable, workspace-relative address served via /raw/, plus a
 // cache-busting reload counter for the iframe.
@@ -159,46 +160,22 @@ onMounted(() => {
     </header>
 
     <main class="body">
-      <aside class="sidebar">
-        <section class="agent-head">
-          <div class="agent-head-row">
-            <h2 class="panel-title">Agents</h2>
-            <span class="conn" :class="{ on: connected }" :title="connected ? 'connected' : 'disconnected'" />
-          </div>
-          <div class="new-chat">
-            <select v-model="newAgentType" class="agent-select">
-              <option value="claude-code">Claude Code</option>
-            </select>
-            <button class="new-chat-btn" :disabled="!connected" @click="newChat">+ New chat</button>
-          </div>
-          <div v-if="agents.length" class="chat-tabs">
-            <div
-              v-for="a in agents"
-              :key="a.id"
-              class="chat-tab"
-              :class="{ active: a.id === selectedAgentId }"
-              @click="selectChat(a.id)"
-            >
-              <span class="chat-tab-label">{{ a.agentType }} · {{ shortId(a.id) }}</span>
-              <span v-if="a.chats > 1" class="chat-tab-badge" title="active views">{{ a.chats }}</span>
-              <button class="chat-close" title="Close chat (terminates the agent)" @click.stop="closeChat(a.id)">×</button>
-            </div>
-          </div>
-        </section>
-
-        <section class="agent-body">
-          <Chat v-if="selectedAgentId" :key="selectedAgentId" :agent-id="selectedAgentId" />
-          <div v-else class="agent-empty">
-            <p class="placeholder">
-              No chat selected. Start one with <strong>+ New chat</strong> to drive an agent
-              against this workspace.
-            </p>
-          </div>
-        </section>
-      </aside>
-
       <section class="viewarea">
         <div class="tabbar">
+          <button
+            class="tab"
+            :class="{ active: activeTab === 'chat' }"
+            @click="activeTab = 'chat'"
+          >
+            <span class="conn" :class="{ on: connected }" /> Chat
+          </button>
+          <button
+            class="tab"
+            :class="{ active: activeTab === 'console' }"
+            @click="activeTab = 'console'"
+          >
+            ▷_ Console
+          </button>
           <button
             class="tab"
             :class="{ active: activeTab === 'files' }"
@@ -246,7 +223,44 @@ onMounted(() => {
           </button>
         </div>
 
-        <!-- Window 1: Live preview -->
+        <!-- Window: Chat -->
+        <div class="window chatwin" v-show="activeTab === 'chat'">
+          <div class="chat-bar">
+            <select v-model="newAgentType" class="agent-select">
+              <option value="claude-code">Claude Code</option>
+            </select>
+            <button class="new-chat-btn" :disabled="!connected" @click="newChat">+ New chat</button>
+            <div class="chat-tabs">
+              <div
+                v-for="a in agents"
+                :key="a.id"
+                class="chat-tab"
+                :class="{ active: a.id === selectedAgentId }"
+                @click="selectChat(a.id)"
+              >
+                <span class="chat-tab-label">{{ a.agentType }} · {{ shortId(a.id) }}</span>
+                <span v-if="a.chats > 1" class="chat-tab-badge" title="active views">{{ a.chats }}</span>
+                <button class="chat-close" title="Close chat (terminates the agent)" @click.stop="closeChat(a.id)">×</button>
+              </div>
+            </div>
+          </div>
+          <div class="chat-host">
+            <Chat v-if="selectedAgentId" :key="selectedAgentId" :agent-id="selectedAgentId" />
+            <div v-else class="chat-empty">
+              <p class="placeholder">
+                No chat selected. Start one with <strong>+ New chat</strong> to drive an agent
+                against this workspace.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Window: Console -->
+        <div class="window consolewin" v-show="activeTab === 'console'">
+          <Console />
+        </div>
+
+        <!-- Window: Live preview -->
         <div class="window frame" v-show="activeTab === 'preview'">
           <iframe :src="previewSrc" title="Design preview" frameborder="0" />
         </div>
@@ -362,37 +376,17 @@ onMounted(() => {
   min-height: 0;
 }
 
-.sidebar {
-  width: 380px;
-  flex-shrink: 0;
-  border-right: 1px solid var(--tool-border);
-  background: var(--tool-panel);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.panel-title {
-  margin: 0;
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--tool-muted);
-}
-
-/* Agent panel: header (new chat + open chats) above, the conversation below. */
-.agent-head {
-  padding: 0.8rem 0.85rem;
-  border-bottom: 1px solid var(--tool-border);
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-.agent-head-row {
+/* Chat window: a switcher bar on top, the conversation below. */
+.chat-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.6rem 0.85rem;
+  border-bottom: 1px solid var(--tool-border);
 }
 .conn {
+  display: inline-block;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -402,12 +396,7 @@ onMounted(() => {
   background: var(--tool-accent);
   box-shadow: 0 0 7px var(--tool-accent);
 }
-.new-chat {
-  display: flex;
-  gap: 0.5rem;
-}
 .agent-select {
-  flex: 1;
   background: var(--tool-bg);
   color: var(--tool-text);
   border: 1px solid var(--tool-border);
@@ -472,13 +461,18 @@ onMounted(() => {
 .chat-close:hover {
   color: var(--tool-danger);
 }
-.agent-body {
+.window.chatwin,
+.window.consolewin {
+  display: flex;
+  flex-direction: column;
+}
+.chat-host {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
-.agent-empty {
+.chat-empty {
   padding: 1rem 0.85rem;
 }
 .placeholder {

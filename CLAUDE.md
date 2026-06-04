@@ -87,6 +87,10 @@ cargo build
 - Agents spawn with `--permission-prompt-tool stdio --permission-mode default
   --allowedTools <rules>`; the pre-approved set is the `--allow` CLI flag (repeatable),
   defaulting to read/edit/`Bash(npm run *)`/git-status. Anything else prompts.
+- **Console** (`src/console.rs` + `ui/src/Console.vue`): runs `bash -lc <command>`
+  in the workspace and streams output over the same `/ws` (`console.run/kill`,
+  `console.output/exit`). Tied to the socket — a reload kills the running command.
+- The SPA is top-tabbed: Chat · Console · File browser · File preview · Live preview.
 
 ## Known TODO
 

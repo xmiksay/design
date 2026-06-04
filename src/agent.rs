@@ -192,6 +192,11 @@ impl AgentManager {
         self.agents.lock().unwrap().get(&id).cloned()
     }
 
+    /// The workspace the agents (and console commands) run in.
+    pub(crate) fn workspace(&self) -> Arc<PathBuf> {
+        self.workspace.clone()
+    }
+
     /// JSON `{ "agents": [...] }` for the REST endpoint.
     pub fn list_json(&self) -> Value {
         json!({ "agents": self.list() })
@@ -339,7 +344,7 @@ impl AgentManager {
 
 /// SIGKILL the whole process group (child + tool subprocesses). `pgid == pid`
 /// because the child was started with `process_group(0)`.
-fn kill_group(pgid: i32) {
+pub(crate) fn kill_group(pgid: i32) {
     #[cfg(unix)]
     unsafe {
         // SIGTERM first for a chance to flush, then SIGKILL to guarantee death.
@@ -387,6 +392,9 @@ pub async fn serve_socket(socket: WebSocket, manager: AgentManager) {
 
     // id → forward task pumping that agent's broadcast into `tx`.
     let mut attachments: HashMap<Uuid, JoinHandle<()>> = HashMap::new();
+    // The console command currently running on this socket (if any).
+    let mut console: Option<crate::console::ConsoleRun> = None;
+    let workspace = manager.workspace();
     let mut registry = manager.subscribe_registry();
 
     // First paint: current agents list.
@@ -397,7 +405,7 @@ pub async fn serve_socket(socket: WebSocket, manager: AgentManager) {
             incoming = stream.next() => {
                 match incoming {
                     Some(Ok(Message::Text(t))) => {
-                        handle_client_frame(&t, &manager, &tx, &mut attachments).await;
+                        handle_client_frame(&t, &manager, &tx, &mut attachments, workspace.as_path(), &mut console).await;
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Ok(_)) => {} // ignore binary / ping / pong
@@ -410,7 +418,13 @@ pub async fn serve_socket(socket: WebSocket, manager: AgentManager) {
         }
     }
 
-    // Socket gone: detach everything (never kills the child), update counts.
+    // Socket gone: kill any console command (it is tied to this socket)...
+    if let Some(run) = console.as_ref() {
+        if run.is_alive() {
+            run.kill();
+        }
+    }
+    // ...and detach every agent (never kills the child), update counts.
     let had_attachments = !attachments.is_empty();
     for (id, handle) in attachments.drain() {
         handle.abort();
@@ -430,6 +444,8 @@ async fn handle_client_frame(
     manager: &AgentManager,
     tx: &mpsc::Sender<Message>,
     attachments: &mut HashMap<Uuid, JoinHandle<()>>,
+    workspace: &std::path::Path,
+    console: &mut Option<crate::console::ConsoleRun>,
 ) {
     let Ok(frame) = serde_json::from_str::<Value>(text) else {
         let _ = tx.send(error_message("invalid JSON frame")).await;
@@ -438,6 +454,28 @@ async fn handle_client_frame(
     let op = frame.get("op").and_then(Value::as_str).unwrap_or("");
 
     match op {
+        "console.run" => {
+            let command = frame.get("command").and_then(Value::as_str).unwrap_or("").trim();
+            if command.is_empty() {
+                let _ = tx.send(error_message("console.run: empty command")).await;
+                return;
+            }
+            if console.as_ref().is_some_and(|c| c.is_alive()) {
+                let _ = tx.send(error_message("a command is already running")).await;
+                return;
+            }
+            match crate::console::run(command, workspace, tx.clone()) {
+                Ok(run) => *console = Some(run),
+                Err(e) => {
+                    let _ = tx.send(error_message(&format!("console spawn failed: {e}"))).await;
+                }
+            }
+        }
+        "console.kill" => {
+            if let Some(run) = console.as_ref() {
+                run.kill();
+            }
+        }
         "list" => {
             let _ = tx.send(agents_message(manager)).await;
         }
