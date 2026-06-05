@@ -14,6 +14,15 @@ struct Cli {
     #[arg(default_value = ".")]
     path: PathBuf,
 
+    /// Loopback port to bind. Optional — defaults to a random free port.
+    #[arg(short = 'p', long = "port", default_value_t = 0)]
+    port: u16,
+
+    /// Bind on all interfaces (0.0.0.0) instead of loopback only, exposing the
+    /// server to your network. Off by default; the token still gates access.
+    #[arg(long = "public")]
+    public: bool,
+
     /// Tool-permission rule pre-approved for spawned agents (repeatable, e.g.
     /// `--allow Read --allow "Bash(npm *)"`). Anything outside the set prompts
     /// in the chat. Passed through to Claude Code's `--allowedTools`.
@@ -57,5 +66,5 @@ fn main() -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(design::server::serve(cli.path, allowed))
+    runtime.block_on(design::server::serve(cli.path, cli.port, cli.public, allowed))
 }

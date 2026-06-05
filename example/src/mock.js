@@ -47,14 +47,16 @@ export const table = {
   columns: [
     { key: "id", label: "Order" },
     { key: "customer", label: "Customer" },
+    { key: "date", label: "Date" },
+    { key: "items", label: "Items", align: "right" },
     { key: "status", label: "Status" },
     { key: "total", label: "Total", align: "right" },
   ],
   rows: [
-    { id: "#1042", customer: "Mara Ellison", status: "Shipped", total: "$48.00" },
-    { id: "#1041", customer: "Tomás Vega", status: "Processing", total: "$120.00" },
-    { id: "#1040", customer: "Aiko Tanaka", status: "Delivered", total: "$32.50" },
-    { id: "#1039", customer: "Sven Holt", status: "Refunded", total: "$0.00" },
+    { id: "#1042", customer: "Mara Ellison", date: "May 28", items: 3, status: "Shipped", total: "$48.00" },
+    { id: "#1041", customer: "Tomás Vega", date: "May 27", items: 7, status: "Processing", total: "$120.00" },
+    { id: "#1040", customer: "Aiko Tanaka", date: "May 25", items: 2, status: "Delivered", total: "$32.50" },
+    { id: "#1039", customer: "Sven Holt", date: "May 22", items: 1, status: "Refunded", total: "$0.00" },
   ],
 };
 

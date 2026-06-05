@@ -23,6 +23,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tower_http::services::ServeDir;
+use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::agent::AgentManager;
 use crate::embed::Spa;
@@ -44,6 +45,9 @@ struct AppState {
     origins: Vec<String>,
     /// Acceptable `Host` authorities (loopback only).
     hosts: Vec<String>,
+    /// Bound on all interfaces (`--public`): relax the fixed Host/Origin
+    /// allowlist to same-origin checks since the client address isn't known.
+    public: bool,
     /// Canonical absolute path of the workspace being served.
     root: Arc<PathBuf>,
     /// Display string for the workspace path (shown in the SPA).
@@ -52,10 +56,16 @@ struct AppState {
     agents: AgentManager,
 }
 
-/// Run the server against `workspace` until Ctrl-C. Binds a random loopback port
+/// Run the server against `workspace` until Ctrl-C. Binds a port (a random free
+/// one when `port` is 0) on loopback, or on all interfaces when `public` is set,
 /// and prints the tokenized URL to open. `allowed` is the tool-permission rule
 /// set pre-approved for spawned agents (passed through to `--allowedTools`).
-pub async fn serve(workspace: PathBuf, allowed: Vec<String>) -> anyhow::Result<()> {
+pub async fn serve(
+    workspace: PathBuf,
+    port: u16,
+    public: bool,
+    allowed: Vec<String>,
+) -> anyhow::Result<()> {
     let workspace = workspace
         .canonicalize()
         .with_context(|| format!("workspace not found: {}", workspace.display()))?;
@@ -70,9 +80,17 @@ pub async fn serve(workspace: PathBuf, allowed: Vec<String>) -> anyhow::Result<(
         );
     }
 
-    let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
+    let bind_ip = if public {
+        Ipv4Addr::UNSPECIFIED // 0.0.0.0 — reachable from other hosts
+    } else {
+        Ipv4Addr::LOCALHOST
+    };
+    let listener = tokio::net::TcpListener::bind(SocketAddr::from((bind_ip, port)))
         .await
-        .context("binding loopback socket")?;
+        .with_context(|| match port {
+            0 => format!("binding {bind_ip} socket"),
+            p => format!("binding {bind_ip}:{p} (already in use?)"),
+        })?;
     let port = listener.local_addr()?.port();
     let token = uuid::Uuid::new_v4().simple().to_string();
 
@@ -86,6 +104,7 @@ pub async fn serve(workspace: PathBuf, allowed: Vec<String>) -> anyhow::Result<(
             format!("http://localhost:{port}"),
         ],
         hosts: vec![format!("127.0.0.1:{port}"), format!("localhost:{port}")],
+        public,
         root,
         workspace_label: workspace.display().to_string(),
         agents: agents.clone(),
@@ -101,14 +120,29 @@ pub async fn serve(workspace: PathBuf, allowed: Vec<String>) -> anyhow::Result<(
         // Raw workspace files served with their guessed mime: this is what the
         // live-view iframe points at, so any file (e.g. preview/index.html) can
         // be used as an address. ServeDir confines access to the workspace root.
-        .nest_service("/raw", ServeDir::new(workspace.as_path()))
+        // `no-store` keeps the iframe from showing stale files after edits.
+        .nest(
+            "/raw",
+            Router::new()
+                .fallback_service(ServeDir::new(workspace.as_path()))
+                .layer(SetResponseHeaderLayer::overriding(
+                    header::CACHE_CONTROL,
+                    HeaderValue::from_static("no-store"),
+                )),
+        )
         .fallback(spa_handler)
         .layer(middleware::from_fn_with_state(state.clone(), security))
         .with_state(state);
 
     let url = format!("http://127.0.0.1:{port}/?t={token}");
-    tracing::info!(%url, workspace = %workspace.display(), "design server listening");
+    tracing::info!(%url, public, workspace = %workspace.display(), "design server listening");
     println!("\n  design → {url}\n");
+    if public {
+        tracing::warn!(
+            "bound on 0.0.0.0:{port} — reachable from your network. Anyone who can \
+             reach this host AND has the token URL can drive the agent."
+        );
+    }
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
@@ -128,15 +162,27 @@ async fn shutdown_signal() {
 
 /// Security gate: loopback Host/Origin enforcement plus per-launch token.
 async fn security(State(state): State<AppState>, req: Request<Body>, next: Next) -> Response {
-    // DNS-rebinding guard: the Host must be a loopback authority we bound.
-    if let Some(host) = header_str(&req, header::HOST) {
-        if !state.hosts.iter().any(|h| h == host) {
-            return forbidden("unexpected Host");
+    let host = header_str(&req, header::HOST);
+    // DNS-rebinding guard: the Host must be a loopback authority we bound. With
+    // `--public` the client address isn't predictable, so we accept any Host and
+    // lean on the same-origin Origin check below plus the token instead.
+    if !state.public {
+        if let Some(host) = host {
+            if !state.hosts.iter().any(|h| h == host) {
+                return forbidden("unexpected Host");
+            }
         }
     }
-    // Cross-site guard: when an Origin is present it must be ours.
+    // Cross-site guard: when an Origin is present it must be ours — the bound
+    // loopback origin normally, or (in `--public` mode) same-origin with the
+    // request's own Host, which still blocks requests from other sites.
     if let Some(origin) = header_str(&req, header::ORIGIN) {
-        if !state.origins.iter().any(|o| o == origin) {
+        let ok = if state.public {
+            host.is_some_and(|h| origin == format!("http://{h}") || origin == format!("https://{h}"))
+        } else {
+            state.origins.iter().any(|o| o == origin)
+        };
+        if !ok {
             return forbidden("unexpected Origin");
         }
     }

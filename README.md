@@ -102,6 +102,12 @@ cargo build
 
 Open the printed URL. Ctrl-C stops the server cleanly.
 
+By default the server binds a random free loopback port. Pin one with `-p`:
+
+```sh
+./target/debug/design ./example -p 4321
+```
+
 ### Agent permissions
 
 Spawned agents run with `--permission-mode default` and a pre-approved tool set.
@@ -118,7 +124,7 @@ design ./my-design-system --allow Read --allow Edit --allow "Bash(npm *)"
 
 The server is the only new attack surface, so it ships locked down from day one:
 
-- Binds `127.0.0.1` only (never `0.0.0.0`).
+- Binds `127.0.0.1` only by default (never `0.0.0.0` unless you ask for it).
 - A random per-launch token authorizes the first navigation via `?t=…`, then
   pins to a `Strict`, `HttpOnly` cookie for the session.
 - `Host` and `Origin` headers are validated against the loopback authority to
@@ -126,6 +132,20 @@ The server is the only new attack surface, so it ships locked down from day one:
 - File reads are confined to the workspace root (path-traversal rejected).
 - `/ws` and the agent/console routes sit behind the same middleware — nothing
   bypasses the token + Host/Origin checks.
+
+### Exposing to your network (`--public`)
+
+`--public` binds `0.0.0.0` so other machines can reach the server — useful for
+driving the agent from a phone or another box. The token still gates every
+request, and the cross-site guard tightens to **same-origin** (the `Origin`, when
+present, must match the request's own `Host`) since the client address can't be
+known in advance. Only the fixed loopback Host allowlist is relaxed. Treat the
+token URL as a secret: anyone who can reach the host and has it can drive the
+agent.
+
+```sh
+design ./my-design-system --public -p 4321
+```
 
 ## License
 

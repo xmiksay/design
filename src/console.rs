@@ -56,6 +56,7 @@ pub fn run(command: &str, cwd: &Path, tx: mpsc::Sender<Message>) -> std::io::Res
     let mut child = cmd.spawn()?;
     let pid = child.id().unwrap_or(0) as i32;
     let alive = Arc::new(AtomicBool::new(true));
+    tracing::info!(command, pid, "console: run");
 
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
@@ -65,6 +66,7 @@ pub fn run(command: &str, cwd: &Path, tx: mpsc::Sender<Message>) -> std::io::Res
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(l)) = lines.next_line().await {
+                tracing::info!(target: "console", stream = "stdout", "{l}");
                 if tx
                     .send(frame(json!({ "op": "console.output", "stream": "stdout", "line": l })))
                     .await
@@ -80,6 +82,7 @@ pub fn run(command: &str, cwd: &Path, tx: mpsc::Sender<Message>) -> std::io::Res
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(l)) = lines.next_line().await {
+                tracing::info!(target: "console", stream = "stderr", "{l}");
                 if tx
                     .send(frame(json!({ "op": "console.output", "stream": "stderr", "line": l })))
                     .await
@@ -99,6 +102,7 @@ pub fn run(command: &str, cwd: &Path, tx: mpsc::Sender<Message>) -> std::io::Res
             let _ = err.await;
             let code = child.wait().await.ok().and_then(|s| s.code());
             alive.store(false, Ordering::Relaxed);
+            tracing::info!(target: "console", code, "console: exit");
             let _ = tx.send(frame(json!({ "op": "console.exit", "code": code }))).await;
         });
     }
