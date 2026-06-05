@@ -194,10 +194,6 @@ function syncAddressFromFrame() {
   }
 }
 
-// What clicking a file in the tree does: show its content, or set it as the
-// live-preview address.
-const clickMode = ref("content"); // "content" | "preview"
-
 // File browser + content state.
 const tree = ref(null);
 const selectedPath = ref(null);
@@ -214,6 +210,25 @@ const EXT_LANG = {
 function extOf(path) {
   const i = path.lastIndexOf(".");
   return i >= 0 ? path.slice(i + 1).toLowerCase() : "";
+}
+
+// What a click on a file *name* does by default: things the iframe can render go
+// to the live preview; textual/code files open in the source editor; everything
+// else (fonts, binaries) has no default action — use the row's icons instead.
+const PREVIEW_EXT = new Set([
+  "html", "htm", "pdf",
+  "png", "jpg", "jpeg", "gif", "svg", "webp", "avif", "ico", "bmp",
+]);
+const TEXT_EXT = new Set([
+  ...Object.keys(EXT_LANG),
+  "txt", "text", "csv", "tsv", "log", "xml", "map", "lock", "ini", "conf",
+  "cfg", "env", "gitignore", "editorconfig", "mjs", "cjs",
+]);
+function defaultActionFor(path) {
+  const e = extOf(path);
+  if (PREVIEW_EXT.has(e)) return "preview";
+  if (TEXT_EXT.has(e)) return "content";
+  return null; // fonts, binaries, unknown: no default action
 }
 const highlighted = computed(() => {
   if (!selectedPath.value) return "";
@@ -236,9 +251,15 @@ async function loadTree() {
   }
 }
 
-async function openFile(path) {
+// `mode` is "content" (source editor), "preview" (live preview), or "default"
+// (resolve from the file type). A name click sends "default"; the row icons send
+// an explicit mode.
+async function openFile(path, mode = "default") {
+  if (mode === "default") mode = defaultActionFor(path);
+  if (!mode) return; // no default action for this file type
+
   selectedPath.value = path;
-  if (clickMode.value === "preview") {
+  if (mode === "preview") {
     addressInput.value = path;
     navigate();
     return;
@@ -387,6 +408,14 @@ onMounted(() => {
           >
             ⟳
           </button>
+          <button
+            v-if="activeTab === 'files'"
+            class="refresh-btn"
+            title="Refresh file tree"
+            @click="loadTree"
+          >
+            ⟳
+          </button>
         </div>
 
         <!-- Window: Chat -->
@@ -448,25 +477,6 @@ onMounted(() => {
 
         <!-- Window 3: File list -->
         <div class="window files" v-show="activeTab === 'files'">
-          <div class="files-modes">
-            <span class="modes-label">On click</span>
-            <div class="click-mode" role="group">
-              <button
-                class="seg"
-                :class="{ active: clickMode === 'content' }"
-                @click="clickMode = 'content'"
-              >
-                Show content
-              </button>
-              <button
-                class="seg"
-                :class="{ active: clickMode === 'preview' }"
-                @click="clickMode = 'preview'"
-              >
-                Set preview address
-              </button>
-            </div>
-          </div>
           <div class="files-scroll">
             <FileTree
               v-if="tree && tree.children"
@@ -791,44 +801,6 @@ onMounted(() => {
 .window.files {
   display: flex;
   flex-direction: column;
-}
-.files-modes {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.6rem 0.85rem;
-  border-bottom: 1px solid var(--tool-border);
-}
-.modes-label {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--tool-muted);
-}
-.click-mode {
-  display: flex;
-  gap: 2px;
-  background: var(--tool-bg);
-  border: 1px solid var(--tool-border);
-  border-radius: 8px;
-  padding: 2px;
-}
-.seg {
-  background: transparent;
-  color: var(--tool-muted);
-  border: none;
-  border-radius: 6px;
-  padding: 0.28rem 0.7rem;
-  font-size: 0.76rem;
-  cursor: pointer;
-}
-.seg.active {
-  background: var(--tool-panel);
-  color: var(--tool-text);
-  box-shadow: inset 0 0 0 1px var(--tool-border);
-}
-.seg:hover:not(.active) {
-  color: var(--tool-text);
 }
 .files-scroll {
   flex: 1;

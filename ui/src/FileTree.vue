@@ -37,19 +37,40 @@ function isCollapsed(node) {
           :nodes="node.children"
           :selected="selected"
           :depth="depth + 1"
-          @open="(p) => emit('open', p)"
+          @open="(p, m) => emit('open', p, m)"
         />
       </template>
-      <button
+      <div
         v-else
         class="row file"
         :class="{ active: selected === node.path }"
-        :style="{ paddingLeft: depth * 12 + 22 + 'px' }"
-        @click="emit('open', node.path)"
       >
-        <span class="icon">›</span>
-        <span class="name">{{ node.name }}</span>
-      </button>
+        <button
+          class="name-btn"
+          :style="{ paddingLeft: depth * 12 + 22 + 'px' }"
+          title="Open (default action for this file type)"
+          @click="emit('open', node.path, 'default')"
+        >
+          <span class="icon">›</span>
+          <span class="name">{{ node.name }}</span>
+        </button>
+        <span class="actions">
+          <button
+            class="act"
+            title="Open source"
+            @click.stop="emit('open', node.path, 'content')"
+          >
+            ‹/›
+          </button>
+          <button
+            class="act"
+            title="Load live preview"
+            @click.stop="emit('open', node.path, 'preview')"
+          >
+            ▷
+          </button>
+        </span>
+      </div>
     </li>
   </ul>
 </template>
@@ -78,9 +99,57 @@ function isCollapsed(node) {
 .row:hover {
   background: rgba(255, 255, 255, 0.05);
 }
+/* File rows are a flex container: a stretchable name button + trailing icons. */
+.row.file {
+  padding: 0;
+}
+.name-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  color: var(--tool-text);
+  font-family: var(--tool-mono);
+  font-size: 0.8rem;
+  padding: 0.18rem 0.5rem;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+}
 .file.active {
   background: rgba(110, 231, 183, 0.14);
+}
+.file.active .name {
   color: var(--tool-accent);
+}
+.actions {
+  display: flex;
+  gap: 0.1rem;
+  padding-right: 0.45rem;
+  opacity: 0;
+}
+.row.file:hover .actions,
+.file.active .actions {
+  opacity: 1;
+}
+.act {
+  background: none;
+  border: none;
+  color: var(--tool-muted);
+  font-family: var(--tool-mono);
+  font-size: 0.74rem;
+  line-height: 1;
+  padding: 0.12rem 0.3rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.act:hover {
+  color: var(--tool-accent);
+  background: rgba(255, 255, 255, 0.08);
 }
 .twisty {
   width: 0.8em;
