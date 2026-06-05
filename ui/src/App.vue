@@ -19,7 +19,8 @@ const defaultPath = boot.previewPath ?? "preview/index.html";
 const activeTab = ref("chat");
 
 // Live preview: an editable, workspace-relative address served via /raw/, plus a
-// cache-busting reload counter for the iframe.
+// cache-busting timestamp for the iframe. A fresh timestamp on every navigate /
+// refresh guarantees a unique URL, so the browser can never serve a stale copy.
 const previewPath = ref(defaultPath);
 const addressInput = ref(defaultPath);
 const reloadKey = ref(0);
@@ -27,15 +28,18 @@ const reloadKey = ref(0);
 function rawUrl(path) {
   return "/raw/" + path.split("/").map(encodeURIComponent).join("/");
 }
-const previewSrc = computed(() => `${rawUrl(previewPath.value)}?r=${reloadKey.value}`);
+const previewSrc = computed(() => {
+  const base = rawUrl(previewPath.value);
+  return reloadKey.value ? `${base}?t=${reloadKey.value}` : base;
+});
 
 function navigate() {
   previewPath.value = addressInput.value.trim().replace(/^\/+/, "");
-  reloadKey.value += 1;
+  reloadKey.value = Date.now();
   activeTab.value = "preview";
 }
 function refreshPreview() {
-  reloadKey.value += 1;
+  reloadKey.value = Date.now();
 }
 
 // Keep the editable address field in sync whenever the iframe's src changes by
@@ -87,14 +91,24 @@ function moveHighlight(el) {
   });
 }
 
+// The real clicked node. With open shadow roots, `event.target` is retargeted to
+// the shadow host; composedPath()[0] reveals the actual element inside the root.
+function eventTarget(e) {
+  const path = typeof e.composedPath === "function" ? e.composedPath() : null;
+  const el = path && path.length ? path[0] : e.target;
+  return el && el.nodeType === 1 && el !== highlightEl ? el : null;
+}
+
 function onInspectMove(e) {
-  if (e.target && e.target !== highlightEl) moveHighlight(e.target);
+  const el = eventTarget(e);
+  if (el) moveHighlight(el);
 }
 
 function onInspectClick(e) {
   e.preventDefault();
   e.stopPropagation();
-  if (e.target) pickElement(e.target);
+  const el = eventTarget(e);
+  if (el) pickElement(el);
 }
 
 async function pickElement(el) {

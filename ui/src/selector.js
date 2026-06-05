@@ -1,24 +1,28 @@
-// Build a reasonably-stable CSS selector for a DOM element, used by the live
-// preview's "object inspect" mode to point an agent at a specific node.
+// Build a locator for a DOM element clicked in the live preview, used by the
+// "object inspect" mode to point an agent at a specific node.
 //
-// Strategy: prefer an id (unique, short-circuits). Otherwise walk up the tree
-// building `tag.class…:nth-of-type(n)` segments until we hit an id or <html>,
-// disambiguating among same-tag siblings with :nth-of-type.
+// Plain CSS selectors can't cross shadow boundaries, and the example substrate
+// renders most components into open shadow roots. So we build a *per-tree-scope*
+// selector — one CSS path within each shadow root (or the document) — and join
+// the scopes, outermost first, with " >> " (the conventional shadow-pierce
+// combinator). e.g.  `ds-button >> button.primary`. It isn't a queryable
+// selector, but it tells the agent exactly which component and inner part to fix.
 
 function cssEscape(s) {
   if (typeof CSS !== "undefined" && CSS.escape) return CSS.escape(s);
   return String(s).replace(/([^a-zA-Z0-9_-])/g, "\\$1");
 }
 
-export function computeSelector(el) {
-  if (!el || el.nodeType !== 1) return "";
+// A `tag.class:nth-of-type(n)` path from `el` up to its tree-scope boundary
+// (the document's <html>, or a shadow root — `parentElement` is null there).
+function selectorWithinRoot(el) {
   if (el.id) return `#${cssEscape(el.id)}`;
 
   const parts = [];
   let node = el;
   while (node && node.nodeType === 1 && node.tagName.toLowerCase() !== "html") {
     if (node.id) {
-      parts.unshift(`#${cssEscape(node.id)}`);
+      parts.unshift(`#${cssEscape(node.id)}`); // ids are scoped per shadow root
       break;
     }
 
@@ -29,7 +33,7 @@ export function computeSelector(el) {
       .filter(Boolean);
     if (classes.length) part += "." + classes.map(cssEscape).join(".");
 
-    const parent = node.parentElement;
+    const parent = node.parentElement; // null at a shadow-root boundary
     if (parent) {
       const sameTag = Array.from(parent.children).filter(
         (c) => c.tagName === node.tagName,
@@ -40,7 +44,24 @@ export function computeSelector(el) {
     }
 
     parts.unshift(part);
-    node = node.parentElement;
+    node = parent;
   }
   return parts.join(" > ");
+}
+
+export function computeSelector(el) {
+  if (!el || el.nodeType !== 1) return "";
+
+  const scopes = [];
+  let node = el;
+  while (node) {
+    scopes.unshift(selectorWithinRoot(node));
+    const root = node.getRootNode();
+    if (root && root.host) {
+      node = root.host; // cross the shadow boundary up to the host element
+    } else {
+      break; // reached the document
+    }
+  }
+  return scopes.join(" >> ");
 }
