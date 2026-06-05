@@ -150,6 +150,19 @@ function sendDraft() {
   busy.value = true;
 }
 
+// Interrupt a running turn. The agent runs in bidirectional stream-json mode, so
+// an interrupt is a control_request on its stdin; the agent answers with a
+// `result`, which flips `busy` back off via parseStreamJson.
+let interruptSeq = 0;
+function stop() {
+  if (!busy.value) return;
+  agentClient.input(props.agentId, {
+    type: "control_request",
+    request_id: `interrupt-${++interruptSeq}`,
+    request: { subtype: "interrupt" },
+  });
+}
+
 // Let the parent (object-inspect mode in the live preview) drop a reference to
 // a picked element into the composer, ready for the user to describe the issue.
 function appendDraft(text) {
@@ -274,7 +287,8 @@ onBeforeUnmount(() => {
         placeholder="Message the agent…  (Enter to send, Shift+Enter for newline)"
         @keydown.enter.exact.prevent="sendDraft"
       />
-      <button class="send" type="submit" :disabled="!draft.trim() || busy">Send ▸</button>
+      <button v-if="busy" class="stop" type="button" @click="stop">■ Stop</button>
+      <button v-else class="send" type="submit" :disabled="!draft.trim()">Send ▸</button>
     </form>
   </div>
 </template>
@@ -475,5 +489,19 @@ onBeforeUnmount(() => {
 .send:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+.stop {
+  align-self: flex-end;
+  background: transparent;
+  color: var(--tool-danger);
+  border: 1px solid var(--tool-danger);
+  border-radius: 8px;
+  padding: 0.45rem 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.stop:hover {
+  background: var(--tool-danger);
+  color: var(--tool-accent-ink);
 }
 </style>
