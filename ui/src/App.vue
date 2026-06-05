@@ -1,11 +1,12 @@
 <script setup>
-import { ref, computed, watch, onMounted } from "vue";
+import { ref, computed, watch, onMounted, nextTick } from "vue";
 import hljs from "highlight.js";
 import "highlight.js/styles/github-dark.css";
 import FileTree from "./FileTree.vue";
 import Chat from "./Chat.vue";
 import Console from "./Console.vue";
 import { agentClient } from "./agent.js";
+import { computeSelector } from "./selector.js";
 
 // Bootstrap injected by the server (workspace path, default preview path). Falls
 // back to sensible defaults when running the SPA standalone via `vite dev`.
@@ -35,6 +36,148 @@ function navigate() {
 }
 function refreshPreview() {
   reloadKey.value += 1;
+}
+
+// Keep the editable address field in sync whenever the iframe's src changes by
+// any path (file-tree "set preview", future programmatic navigation, etc.).
+watch(previewPath, (p) => {
+  addressInput.value = p;
+});
+
+// ---- Object inspect ----
+// The iframe serves /raw/ from the same origin, so we can reach into its
+// document directly: highlight on hover, and on click capture a CSS selector +
+// the preview path and drop them into the chat composer for the agent to act on.
+const previewFrame = ref(null);
+const chatRef = ref(null);
+const inspecting = ref(false);
+let inspectCleanup = null;
+let highlightEl = null;
+
+function frameDoc() {
+  try {
+    return previewFrame.value?.contentDocument ?? null;
+  } catch {
+    return null; // cross-origin address — inspection not available
+  }
+}
+
+function moveHighlight(el) {
+  const doc = el.ownerDocument;
+  if (!highlightEl || highlightEl.ownerDocument !== doc) {
+    highlightEl = doc.createElement("div");
+    highlightEl.style.cssText = [
+      "position:fixed",
+      "pointer-events:none",
+      "z-index:2147483647",
+      "background:rgba(74,163,255,0.18)",
+      "outline:2px solid #4aa3ff",
+      "border-radius:2px",
+      "transition:all 40ms ease",
+    ].join(";");
+    doc.body.appendChild(highlightEl);
+  }
+  const r = el.getBoundingClientRect();
+  Object.assign(highlightEl.style, {
+    display: "block",
+    left: `${r.left}px`,
+    top: `${r.top}px`,
+    width: `${r.width}px`,
+    height: `${r.height}px`,
+  });
+}
+
+function onInspectMove(e) {
+  if (e.target && e.target !== highlightEl) moveHighlight(e.target);
+}
+
+function onInspectClick(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.target) pickElement(e.target);
+}
+
+async function pickElement(el) {
+  const selector = computeSelector(el);
+  const path = previewPath.value;
+  const text =
+    `In the live preview \`/raw/${path}\`, look at the element ` +
+    `\`${selector}\`: `;
+  inspecting.value = false;
+  activeTab.value = "chat";
+  if (!selectedAgentId.value) {
+    await newChat();
+    await nextTick();
+  }
+  chatRef.value?.appendDraft(text);
+}
+
+function startInspect() {
+  const doc = frameDoc();
+  if (!doc) {
+    inspecting.value = false;
+    return;
+  }
+  doc.addEventListener("mousemove", onInspectMove, true);
+  doc.addEventListener("click", onInspectClick, true);
+  try {
+    doc.body.style.cursor = "crosshair";
+  } catch {
+    /* ignore */
+  }
+  inspectCleanup = () => {
+    doc.removeEventListener("mousemove", onInspectMove, true);
+    doc.removeEventListener("click", onInspectClick, true);
+    try {
+      doc.body.style.cursor = "";
+    } catch {
+      /* ignore */
+    }
+    if (highlightEl) {
+      highlightEl.remove();
+      highlightEl = null;
+    }
+  };
+}
+
+function teardownInspect() {
+  if (inspectCleanup) {
+    inspectCleanup();
+    inspectCleanup = null;
+  }
+}
+
+watch(inspecting, (on) => {
+  teardownInspect();
+  if (on) {
+    activeTab.value = "preview";
+    nextTick(startInspect);
+  }
+});
+
+// On every iframe load — including in-page link clicks that navigate the iframe
+// itself — reflect the iframe's real location back into the address field and
+// state, then re-arm inspection if it's active.
+function onFrameLoad() {
+  syncAddressFromFrame();
+  if (inspecting.value) {
+    teardownInspect();
+    startInspect();
+  }
+}
+
+function syncAddressFromFrame() {
+  try {
+    const loc = previewFrame.value?.contentWindow?.location;
+    if (!loc) return;
+    let p = decodeURIComponent(loc.pathname);
+    if (!p.startsWith("/raw/")) return; // off-workspace navigation: leave as-is
+    p = p.slice("/raw/".length);
+    addressInput.value = p;
+    if (previewPath.value !== p) previewPath.value = p;
+  } catch {
+    /* cross-origin or not yet loaded */
+  }
 }
 
 // What clicking a file in the tree does: show its content, or set it as the
@@ -215,6 +358,15 @@ onMounted(() => {
           </form>
           <button
             v-if="activeTab === 'preview'"
+            class="refresh-btn inspect-btn"
+            :class="{ active: inspecting }"
+            title="Object inspect: click an element to reference it in chat"
+            @click="inspecting = !inspecting"
+          >
+            ⌖
+          </button>
+          <button
+            v-if="activeTab === 'preview'"
             class="refresh-btn"
             title="Reload preview"
             @click="refreshPreview"
@@ -245,7 +397,7 @@ onMounted(() => {
             </div>
           </div>
           <div class="chat-host">
-            <Chat v-if="selectedAgentId" :key="selectedAgentId" :agent-id="selectedAgentId" />
+            <Chat v-if="selectedAgentId" ref="chatRef" :key="selectedAgentId" :agent-id="selectedAgentId" />
             <div v-else class="chat-empty">
               <p class="placeholder">
                 No chat selected. Start one with <strong>+ New chat</strong> to drive an agent
@@ -262,7 +414,13 @@ onMounted(() => {
 
         <!-- Window: Live preview -->
         <div class="window frame" v-show="activeTab === 'preview'">
-          <iframe :src="previewSrc" title="Design preview" frameborder="0" />
+          <iframe
+            ref="previewFrame"
+            :src="previewSrc"
+            title="Design preview"
+            frameborder="0"
+            @load="onFrameLoad"
+          />
         </div>
 
         <!-- Window 2: File content -->
@@ -578,6 +736,11 @@ onMounted(() => {
 .refresh-btn:hover {
   border-color: var(--tool-accent);
   color: var(--tool-accent);
+}
+.inspect-btn.active {
+  border-color: var(--tool-accent);
+  background: var(--tool-accent);
+  color: var(--tool-accent-ink);
 }
 
 .window {

@@ -14,6 +14,7 @@ const entries = ref([]);
 const busy = ref(false);
 const draft = ref("");
 const scroller = ref(null);
+const composer = ref(null);
 
 let unsub = null;
 
@@ -149,6 +150,20 @@ function sendDraft() {
   busy.value = true;
 }
 
+// Let the parent (object-inspect mode in the live preview) drop a reference to
+// a picked element into the composer, ready for the user to describe the issue.
+function appendDraft(text) {
+  draft.value = draft.value ? `${draft.value}\n${text}` : text;
+  nextTick(() => {
+    const el = composer.value;
+    if (el) {
+      el.focus();
+      el.selectionStart = el.selectionEnd = el.value.length;
+    }
+  });
+}
+defineExpose({ appendDraft });
+
 function answer(entry, allow) {
   const response = allow
     ? { behavior: "allow", updatedInput: entry.input }
@@ -252,6 +267,7 @@ onBeforeUnmount(() => {
 
     <form class="composer" @submit.prevent="sendDraft">
       <textarea
+        ref="composer"
         v-model="draft"
         class="composer-input"
         rows="3"
