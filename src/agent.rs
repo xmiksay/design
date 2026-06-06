@@ -32,6 +32,14 @@ use uuid::Uuid;
 /// Cap on per-session replay history (output + stderr frames).
 const HISTORY_MAX: usize = 5000;
 
+/// System prompt injected at spawn so every agent shares one consistent,
+/// substrate-focused framing — independent of whatever `CLAUDE.md` the workspace
+/// happens to carry. **Appended**, not replaced: Claude Code's built-in tool and
+/// safety guidance must stay intact, so we only layer the `design`-tool role on
+/// top. The text lives in `prompts/design_system_prompt.md` and is baked into the
+/// binary at compile time via `include_str!` (edit the `.md`, not this line).
+const DESIGN_SYSTEM_PROMPT: &str = include_str!("prompts/design_system_prompt.md");
+
 // ---- Agent kinds + spawn spec --------------------------------------------
 
 /// Supported agent kinds. New kinds are new variants — no protocol knowledge
@@ -62,9 +70,16 @@ struct AgentSpec {
 }
 
 impl AgentSpec {
-    fn for_type(t: AgentType, allowed: &[String]) -> Self {
+    fn for_type(
+        t: AgentType,
+        allowed: &[String],
+        resume: Option<&str>,
+        port: u16,
+        token: &str,
+        extra_prompt: Option<&str>,
+    ) -> Self {
         match t {
-            AgentType::ClaudeCode => Self::claude(allowed),
+            AgentType::ClaudeCode => Self::claude(allowed, resume, port, token, extra_prompt),
         }
     }
 
@@ -72,7 +87,17 @@ impl AgentSpec {
     /// stdio` routes tool-permission prompts over the stdio control protocol
     /// (captured as `control_request` lines the SPA answers with `control_response`);
     /// `--allowedTools` pre-approves the user's rule set so prompts stay rare.
-    fn claude(allowed: &[String]) -> Self {
+    /// When `resume` is set, `--resume <id>` reattaches to a prior session for this
+    /// workspace (the transcript is seeded separately, see [`seed_history`]).
+    fn claude(allowed: &[String], resume: Option<&str>, port: u16, token: &str, extra_prompt: Option<&str>) -> Self {
+        // Our built-in role, plus the user's launch-time extension (`--prompt`/
+        // `--prompt-file`) when given — the whole thing is appended to Claude
+        // Code's default system prompt.
+        let mut system = DESIGN_SYSTEM_PROMPT.to_string();
+        if let Some(extra) = extra_prompt.map(str::trim).filter(|s| !s.is_empty()) {
+            system.push_str("\n\n");
+            system.push_str(extra);
+        }
         let mut args = vec![
             "-p".into(),
             "--input-format".into(),
@@ -86,15 +111,122 @@ impl AgentSpec {
             "stdio".into(),
             "--permission-mode".into(),
             "default".into(),
+            // Layer the substrate-focused role on top of Claude Code's defaults.
+            "--append-system-prompt".into(),
+            system,
         ];
-        if !allowed.is_empty() {
-            args.push("--allowedTools".into());
-            args.push(allowed.join(","));
+        // Pre-approve our MCP tool alongside the user's rules so a preview switch
+        // never prompts. (Always pass --allowedTools now: our tool is always in it.)
+        let mut allow = allowed.to_vec();
+        allow.push("mcp__design__show_preview".into());
+        args.push("--allowedTools".into());
+        args.push(allow.join(","));
+        // Register the design MCP server: this same binary in `--mcp` mode. It
+        // reaches back to our loopback API via the env-injected port + token.
+        // `--strict-mcp-config` keeps the user's global MCP servers out, so the
+        // agent sees only design's tools.
+        if let Ok(exe) = std::env::current_exe() {
+            let cfg = json!({
+                "mcpServers": {
+                    "design": {
+                        "type": "stdio",
+                        "command": exe.to_string_lossy(),
+                        "args": ["--mcp"],
+                        "env": {
+                            "DESIGN_PORT": port.to_string(),
+                            "DESIGN_TOKEN": token,
+                        }
+                    }
+                }
+            });
+            args.push("--mcp-config".into());
+            args.push(cfg.to_string());
+            args.push("--strict-mcp-config".into());
+        }
+        if let Some(id) = resume {
+            args.push("--resume".into());
+            args.push(id.to_string());
         }
         Self {
             program: "claude".into(),
             args,
         }
+    }
+}
+
+// ---- Claude session discovery (for "resume past chat") -------------------
+
+/// Public view of a resumable Claude session on disk, for the sessions list.
+#[derive(Serialize)]
+struct SessionInfo {
+    id: String,
+    /// Human label: Claude's auto-generated `ai-title`, else the first prompt.
+    title: String,
+    /// Last-modified, seconds since the Unix epoch (for sorting + display).
+    mtime: u64,
+}
+
+/// Claude Code stores per-project transcripts under
+/// `~/.claude/projects/<encoded>/`, where `<encoded>` is the workspace's absolute
+/// path with every `/` and `.` turned into `-`.
+fn claude_project_dir(workspace: &std::path::Path) -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let encoded: String = workspace
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c == '/' || c == '.' { '-' } else { c })
+        .collect();
+    Some(PathBuf::from(home).join(".claude/projects").join(encoded))
+}
+
+/// Best-effort label for a session file: the latest `ai-title`, else the first
+/// user prompt (truncated), else `None`.
+fn session_title(path: &std::path::Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let mut title = None;
+    let mut first_user = None;
+    for line in content.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        match v.get("type").and_then(Value::as_str) {
+            Some("ai-title") => {
+                if let Some(t) = v.get("aiTitle").and_then(Value::as_str) {
+                    title = Some(t.to_string());
+                }
+            }
+            Some("user") if first_user.is_none() => {
+                if let Some(s) = v.get("message").and_then(|m| m.get("content")).and_then(Value::as_str) {
+                    first_user = Some(s.chars().take(80).collect::<String>());
+                }
+            }
+            _ => {}
+        }
+    }
+    title.or(first_user)
+}
+
+/// Seed a fresh session's replay history from a prior transcript on disk, so a
+/// resumed chat repaints. The `.jsonl`'s `user`/`assistant` lines are already in
+/// the SPA's stream-json shape, so they are forwarded verbatim (sidechains and
+/// non-conversation bookkeeping lines are skipped).
+fn seed_history(history: &Arc<Mutex<VecDeque<SessionEvent>>>, workspace: &std::path::Path, session_id: &str) {
+    let Some(path) = claude_project_dir(workspace).map(|d| d.join(format!("{session_id}.jsonl"))) else {
+        return;
+    };
+    let Ok(content) = std::fs::read_to_string(&path) else { return };
+    let mut h = history.lock().unwrap();
+    for line in content.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        let t = v.get("type").and_then(Value::as_str).unwrap_or("");
+        if !matches!(t, "assistant" | "user") {
+            continue;
+        }
+        if v.get("isSidechain").and_then(Value::as_bool).unwrap_or(false) {
+            continue;
+        }
+        if h.len() >= HISTORY_MAX {
+            h.pop_front();
+        }
+        h.push_back(SessionEvent::Output(line.to_string()));
     }
 }
 
@@ -165,17 +297,33 @@ pub struct AgentManager {
     agents: Arc<Mutex<HashMap<Uuid, Arc<AgentSession>>>>,
     workspace: Arc<PathBuf>,
     allowed: Arc<Vec<String>>,
+    /// Loopback port + per-launch token, so spawned agents can register the design
+    /// MCP server and reach back to this server's API (see [`AgentSpec::claude`]).
+    port: u16,
+    token: Arc<String>,
+    /// User-supplied system-prompt extension (`--prompt`/`--prompt-file`), appended
+    /// to the built-in design prompt for every agent. `None` when not provided.
+    extra_prompt: Option<Arc<String>>,
     /// Ticks whenever the registry changes, so every socket re-sends the list.
     registry_tx: broadcast::Sender<()>,
 }
 
 impl AgentManager {
-    pub fn new(workspace: Arc<PathBuf>, allowed: Arc<Vec<String>>) -> Self {
+    pub fn new(
+        workspace: Arc<PathBuf>,
+        allowed: Arc<Vec<String>>,
+        port: u16,
+        token: Arc<String>,
+        extra_prompt: Option<Arc<String>>,
+    ) -> Self {
         let (registry_tx, _) = broadcast::channel(16);
         Self {
             agents: Arc::new(Mutex::new(HashMap::new())),
             workspace,
             allowed,
+            port,
+            token,
+            extra_prompt,
             registry_tx,
         }
     }
@@ -202,6 +350,42 @@ impl AgentManager {
         json!({ "agents": self.list() })
     }
 
+    /// JSON `{ "sessions": [...] }` — prior Claude transcripts for this workspace,
+    /// newest first, that the SPA can offer to resume.
+    pub fn list_sessions_json(&self) -> Value {
+        json!({ "sessions": self.list_sessions() })
+    }
+
+    fn list_sessions(&self) -> Vec<SessionInfo> {
+        let Some(dir) = claude_project_dir(&self.workspace) else {
+            return Vec::new();
+        };
+        let Ok(read) = std::fs::read_dir(&dir) else {
+            return Vec::new();
+        };
+        let mut out: Vec<SessionInfo> = read
+            .flatten()
+            .filter_map(|e| {
+                let path = e.path();
+                if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                    return None;
+                }
+                let id = path.file_stem()?.to_str()?.to_string();
+                let mtime = e
+                    .metadata()
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let title = session_title(&path).unwrap_or_else(|| id.clone());
+                Some(SessionInfo { id, title, mtime })
+            })
+            .collect();
+        out.sort_by(|a, b| b.mtime.cmp(&a.mtime));
+        out
+    }
+
     fn list(&self) -> Vec<AgentInfo> {
         let map = self.agents.lock().unwrap();
         let mut out: Vec<AgentInfo> = map
@@ -217,8 +401,17 @@ impl AgentManager {
     }
 
     /// Spawn a new agent process in the workspace and wire up its I/O pumps.
-    fn spawn(&self, agent_type: AgentType) -> anyhow::Result<Uuid> {
-        let spec = AgentSpec::for_type(agent_type, &self.allowed);
+    /// When `resume` is set, reattach to that prior Claude session and seed the
+    /// replay history from its transcript so the chat repaints.
+    fn spawn(&self, agent_type: AgentType, resume: Option<&str>) -> anyhow::Result<Uuid> {
+        let spec = AgentSpec::for_type(
+            agent_type,
+            &self.allowed,
+            resume,
+            self.port,
+            &self.token,
+            self.extra_prompt.as_deref().map(String::as_str),
+        );
 
         let mut cmd = Command::new(&spec.program);
         cmd.args(&spec.args)
@@ -247,6 +440,12 @@ impl AgentManager {
         let (stdin_tx, mut stdin_rx) = mpsc::channel::<String>(64);
         let (out_tx, _) = broadcast::channel::<SessionEvent>(2048);
         let history = Arc::new(Mutex::new(VecDeque::new()));
+
+        // Pre-fill history from the prior transcript BEFORE the stdout pump starts,
+        // so the recovered conversation sits ahead of any fresh output.
+        if let Some(sid) = resume {
+            seed_history(&history, self.workspace.as_path(), sid);
+        }
 
         let session = Arc::new(AgentSession {
             id,
@@ -376,7 +575,7 @@ fn error_message(msg: &str) -> Message {
 /// Serve one WebSocket: a multiplexed control + data channel over the agent
 /// registry. Attachments are per-socket and torn down on disconnect — agents
 /// keep running.
-pub async fn serve_socket(socket: WebSocket, manager: AgentManager) {
+pub async fn serve_socket(socket: WebSocket, manager: AgentManager, mut ui_rx: broadcast::Receiver<Value>) {
     let (mut sink, mut stream) = socket.split();
 
     // All writes to the sink funnel through one mpsc so forward tasks, control
@@ -400,6 +599,9 @@ pub async fn serve_socket(socket: WebSocket, manager: AgentManager) {
     // First paint: current agents list.
     let _ = tx.send(agents_message(&manager)).await;
 
+    // Server-pushed UI events (e.g. preview switches) are forwarded verbatim until
+    // the broadcast closes (server shutdown), after which we stop polling it.
+    let mut ui_live = true;
     loop {
         tokio::select! {
             incoming = stream.next() => {
@@ -414,6 +616,13 @@ pub async fn serve_socket(socket: WebSocket, manager: AgentManager) {
             }
             _ = registry.recv() => {
                 let _ = tx.send(agents_message(&manager)).await;
+            }
+            ui = ui_rx.recv(), if ui_live => {
+                match ui {
+                    Ok(v) => { let _ = tx.send(Message::Text(v.to_string().into())).await; }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => ui_live = false,
+                }
             }
         }
     }
@@ -484,8 +693,9 @@ async fn handle_client_frame(
                 .get("agentType")
                 .and_then(Value::as_str)
                 .unwrap_or("claude-code");
+            let resume = frame.get("resume").and_then(Value::as_str);
             match AgentType::from_wire(kind) {
-                Some(t) => match manager.spawn(t) {
+                Some(t) => match manager.spawn(t, resume) {
                     Ok(id) => {
                         let _ = tx.send(simple_message("spawned", id)).await;
                     }

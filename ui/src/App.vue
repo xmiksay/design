@@ -42,6 +42,16 @@ function refreshPreview() {
   reloadKey.value = Date.now();
 }
 
+// The agent (via the MCP `show_preview` tool) asks to show a workspace file in
+// the live preview. Navigate the iframe there and bring the tab to the front.
+function showPreview(path) {
+  const p = (path ?? "").trim().replace(/^\/+/, "");
+  if (!p) return;
+  previewPath.value = p; // watch(previewPath) keeps the address field in sync
+  reloadKey.value = Date.now();
+  activeTab.value = "preview";
+}
+
 // Keep the editable address field in sync whenever the iframe's src changes by
 // any path (file-tree "set preview", future programmatic navigation, etc.).
 watch(previewPath, (p) => {
@@ -251,6 +261,12 @@ async function loadTree() {
   }
 }
 
+// Re-fetch the tree every time the File browser tab is activated, so files the
+// agent created/removed while another tab was up show up without a page reload.
+watch(activeTab, (tab) => {
+  if (tab === "files") loadTree();
+});
+
 // `mode` is "content" (source editor), "preview" (live preview), or "default"
 // (resolve from the file type). A name click sends "default"; the row icons send
 // an explicit mode.
@@ -290,6 +306,36 @@ async function newChat() {
   const id = await agentClient.spawn(newAgentType.value);
   if (id) selectedAgentId.value = id;
 }
+
+// ---- Resume past chats (Claude transcripts bound to this workspace) ----
+const sessions = ref([]);
+const showResume = ref(false);
+const loadingSessions = ref(false);
+
+async function toggleResume() {
+  showResume.value = !showResume.value;
+  if (showResume.value) {
+    loadingSessions.value = true;
+    sessions.value = await agentClient.listSessions();
+    loadingSessions.value = false;
+  }
+}
+
+async function resumeChat(id) {
+  showResume.value = false;
+  const newId = await agentClient.spawn("claude-code", id);
+  if (newId) selectedAgentId.value = newId;
+}
+
+// Compact "3h ago" style age from a Unix-seconds timestamp.
+function ago(secs) {
+  if (!secs) return "";
+  const d = Math.max(0, Math.floor(Date.now() / 1000) - secs);
+  if (d < 60) return "just now";
+  if (d < 3600) return `${Math.floor(d / 60)}m ago`;
+  if (d < 86400) return `${Math.floor(d / 3600)}h ago`;
+  return `${Math.floor(d / 86400)}d ago`;
+}
 function selectChat(id) {
   selectedAgentId.value = id;
 }
@@ -318,6 +364,7 @@ watch(
 
 onMounted(() => {
   loadTree();
+  agentClient.onPreview((frame) => showPreview(frame.path));
   agentClient.connect();
 });
 </script>
@@ -425,6 +472,25 @@ onMounted(() => {
               <option value="claude-code">Claude Code</option>
             </select>
             <button class="new-chat-btn" :disabled="!connected" @click="newChat">+ New chat</button>
+            <div class="resume-wrap">
+              <button class="resume-btn" :disabled="!connected" title="Resume a past Claude chat in this workspace" @click="toggleResume">
+                ⤺ Resume
+              </button>
+              <div v-if="showResume" class="resume-menu">
+                <p v-if="loadingSessions" class="resume-empty">Loading…</p>
+                <p v-else-if="!sessions.length" class="resume-empty">No past chats for this workspace.</p>
+                <button
+                  v-for="s in sessions"
+                  :key="s.id"
+                  class="resume-item"
+                  :title="s.id"
+                  @click="resumeChat(s.id)"
+                >
+                  <span class="resume-title">{{ s.title }}</span>
+                  <span class="resume-age">{{ ago(s.mtime) }}</span>
+                </button>
+              </div>
+            </div>
             <div class="chat-tabs">
               <div
                 v-for="a in agents"
@@ -599,6 +665,76 @@ onMounted(() => {
 .new-chat-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+.resume-wrap {
+  position: relative;
+}
+.resume-btn {
+  background: var(--tool-bg);
+  color: var(--tool-text);
+  border: 1px solid var(--tool-border);
+  border-radius: 7px;
+  padding: 0.4rem 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.resume-btn:hover:not(:disabled) {
+  border-color: var(--tool-accent);
+  color: var(--tool-accent);
+}
+.resume-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.resume-menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 20;
+  width: 22rem;
+  max-height: 20rem;
+  overflow-y: auto;
+  background: var(--tool-panel);
+  border: 1px solid var(--tool-border);
+  border-radius: 9px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
+  padding: 0.3rem;
+}
+.resume-empty {
+  margin: 0;
+  padding: 0.6rem;
+  font-size: 0.8rem;
+  color: var(--tool-muted);
+}
+.resume-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 0.45rem 0.55rem;
+  cursor: pointer;
+  color: var(--tool-text);
+}
+.resume-item:hover {
+  background: var(--tool-bg);
+}
+.resume-title {
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.resume-age {
+  flex: none;
+  font-family: var(--tool-mono);
+  font-size: 0.7rem;
+  color: var(--tool-muted);
 }
 .chat-tabs {
   display: flex;

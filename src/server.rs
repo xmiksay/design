@@ -19,9 +19,11 @@ use axum::extract::{Query, State, WebSocketUpgrade};
 use axum::http::{header, HeaderValue, Request, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use tokio::sync::broadcast;
 use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
 
@@ -54,6 +56,10 @@ struct AppState {
     workspace_label: String,
     /// Live agent processes, keyed by UUID (decoupled from sockets).
     agents: AgentManager,
+    /// Server-pushed UI events, fanned out to every attached `/ws` socket. Each
+    /// value is a ready-to-send frame (e.g. `{op:"preview", path}`). The MCP
+    /// bridge feeds this so agents can drive the SPA; future commands reuse it.
+    ui_tx: broadcast::Sender<Value>,
 }
 
 /// Run the server against `workspace` until Ctrl-C. Binds a port (a random free
@@ -65,6 +71,7 @@ pub async fn serve(
     port: u16,
     public: bool,
     allowed: Vec<String>,
+    extra_prompt: Option<String>,
 ) -> anyhow::Result<()> {
     let workspace = workspace
         .canonicalize()
@@ -95,7 +102,16 @@ pub async fn serve(
     let token = uuid::Uuid::new_v4().simple().to_string();
 
     let root = Arc::new(workspace.clone());
-    let agents = AgentManager::new(root.clone(), Arc::new(allowed));
+    // Port + token let spawned agents register the design MCP server and reach
+    // back to this server's loopback API (see AgentManager / src/mcp.rs).
+    let agents = AgentManager::new(
+        root.clone(),
+        Arc::new(allowed),
+        port,
+        Arc::new(token.clone()),
+        extra_prompt.map(Arc::new),
+    );
+    let (ui_tx, _) = broadcast::channel::<Value>(64);
 
     let state = AppState {
         token: token.clone(),
@@ -108,12 +124,16 @@ pub async fn serve(
         root,
         workspace_label: workspace.display().to_string(),
         agents: agents.clone(),
+        ui_tx,
     };
 
     let app = Router::new()
         .route("/api/tree", get(tree_handler))
         .route("/api/file", get(file_handler))
         .route("/api/agents", get(agents_handler))
+        .route("/api/sessions", get(sessions_handler))
+        // Agent-driven UI control (via the MCP bridge): switch the live preview.
+        .route("/api/preview", post(preview_handler))
         // Multiplexed agent channel. Behind the security layer (below), so the
         // upgrade is authenticated by the same cookie/token + Host/Origin gate.
         .route("/ws", get(ws_handler))
@@ -262,10 +282,36 @@ async fn agents_handler(State(state): State<AppState>) -> Response {
     Json(state.agents.list_json()).into_response()
 }
 
+/// GET `/api/sessions` — prior Claude transcripts for this workspace that the SPA
+/// can offer to resume (newest first).
+async fn sessions_handler(State(state): State<AppState>) -> Response {
+    Json(state.agents.list_sessions_json()).into_response()
+}
+
 /// GET `/ws` — upgrade to the multiplexed agent channel. Already authenticated
 /// by the `security` layer (cookie/token + Host/Origin) on the handshake.
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
-    ws.on_upgrade(move |socket| crate::agent::serve_socket(socket, state.agents))
+    let ui_rx = state.ui_tx.subscribe();
+    ws.on_upgrade(move |socket| crate::agent::serve_socket(socket, state.agents, ui_rx))
+}
+
+#[derive(Deserialize)]
+struct PreviewReq {
+    path: String,
+}
+
+/// POST `/api/preview` — broadcast a "switch the live preview" event to every
+/// attached SPA. Driven by the MCP `show_preview` tool; authorized by the same
+/// `?t=` token gate as everything else. Accepts a workspace-relative path or a
+/// `/raw/`-prefixed one.
+async fn preview_handler(State(state): State<AppState>, Json(req): Json<PreviewReq>) -> Response {
+    let path = req.path.trim().trim_start_matches('/');
+    let path = path.strip_prefix("raw/").unwrap_or(path);
+    if path.is_empty() {
+        return (StatusCode::BAD_REQUEST, "empty path").into_response();
+    }
+    let _ = state.ui_tx.send(json!({ "op": "preview", "path": path }));
+    StatusCode::OK.into_response()
 }
 
 // ---- File browser API ----------------------------------------------------
