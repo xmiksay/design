@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>design — app shell</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../src/tokens.css" />
+    <link rel="stylesheet" href="../src/styles.css" />
+    <link rel="stylesheet" href="../src/layout.css" />
+  </head>
+  <body class="app">
+    <div class="shell" id="shell">
+      <!-- Topbar -->
+      <header class="topbar">
+        <div class="brand">
+          <span class="logo">◆</span>
+          <span class="wordmark">design</span>
+        </div>
+        <div class="workspace">
+          <span class="ws-label">workspace</span>
+          <span class="ws-path">./design</span>
+        </div>
+        <div class="topbar-spacer"></div>
+        <ds-switch data-theme-switch label="Light"></ds-switch>
+        <ds-status on>agent · live</ds-status>
+      </header>
+
+      <!-- Three zones -->
+      <div class="zones">
+        <!-- Files (thin, collapsible) -->
+        <section class="zone files-zone">
+          <div class="zone-head">
+            <span class="zone-title">Files</span>
+            <span class="grow"></span>
+            <button class="icon-btn" id="railToggle" title="Collapse">⟨</button>
+          </div>
+          <div class="filelist">
+            <button class="file-row dir"><span class="ic">▾</span><span class="name">components</span></button>
+            <button class="file-row indent"><span class="ic">›</span><span class="name">ds-button.js</span></button>
+            <button class="file-row indent"><span class="ic">›</span><span class="name">ds-message.js</span></button>
+            <button class="file-row dir"><span class="ic">▾</span><span class="name">src</span></button>
+            <button class="file-row indent active"><span class="ic">›</span><span class="name">tokens.css</span></button>
+            <button class="file-row indent"><span class="ic">›</span><span class="name">tokens.json</span></button>
+            <button class="file-row indent"><span class="ic">›</span><span class="name">styles.css</span></button>
+            <button class="file-row dir"><span class="ic">▾</span><span class="name">preview</span></button>
+            <button class="file-row indent"><span class="ic">›</span><span class="name">index.html</span></button>
+            <button class="file-row indent"><span class="ic">›</span><span class="name">layout.html</span></button>
+          </div>
+        </section>
+
+        <!-- Preview (web / source) -->
+        <section class="zone preview-zone">
+          <div class="zone-head">
+            <div class="viewtabs">
+              <div class="seg" id="seg">
+                <button class="on" data-view="web">web</button>
+                <button data-view="source">source</button>
+              </div>
+              <select class="device-select dev-only" id="deviceSelect" title="Device size">
+                <option value="desktop">Desktop</option>
+                <option value="tablet">Tablet · 820×1180</option>
+                <option value="tablet-sm">Small tablet · 768×1024</option>
+                <option value="mobile-lg">Large phone · 430×932</option>
+                <option value="mobile-sm">Small phone · 360×740</option>
+              </select>
+              <button class="icon-btn dev-only" id="touchBtn" title="Touch cursor">☝</button>
+            </div>
+            <span class="grow"></span>
+            <ds-field prefix="/raw/" value="design/preview/index.html"></ds-field>
+          </div>
+          <div class="preview-body">
+            <div class="web-view on" id="webView">
+              <ds-device id="device" device="desktop" src="index.html"></ds-device>
+            </div>
+            <div class="src-view" id="srcView">
+<pre><span class="c">/* Generated from DTCG tokens — do not edit by hand. */</span>
+<span class="k">:root</span> {
+  <span class="k">--color-bg</span>: <span class="v">#15171c</span>;
+  <span class="k">--color-panel</span>: <span class="v">#1c1f26</span>;
+  <span class="k">--color-border</span>: <span class="v">#2a2e38</span>;
+  <span class="k">--color-text</span>: <span class="v">#e7e9ee</span>;
+  <span class="k">--color-muted</span>: <span class="v">#8b93a3</span>;
+  <span class="k">--color-accent</span>: <span class="v">#6ee7b7</span>;
+  <span class="k">--color-accent-ink</span>: <span class="v">#08130d</span>;
+  <span class="k">--color-danger</span>: <span class="v">#f87171</span>;
+  <span class="k">--radius-md</span>: <span class="v">7px</span>;
+  <span class="k">--radius-pill</span>: <span class="v">999px</span>;
+}
+</pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- Chat (always present, expandable) -->
+        <section class="zone chat-zone">
+          <div class="zone-head">
+            <span class="zone-title">Chat</span>
+            <span class="grow"></span>
+            <button class="icon-btn" id="chatToggle" title="Expand">⤢</button>
+          </div>
+          <div class="chat-log">
+            <ds-message role="assistant">Repalette done — the kit now matches the driver SPA. Want the file rail collapsible?</ds-message>
+            <ds-message role="user">Yes. And keep chat on the right, expandable.</ds-message>
+            <ds-message role="assistant">Built. The rail collapses to icons (⟨) and chat widens with ⤢.</ds-message>
+            <ds-message role="queued">show me the source view too</ds-message>
+          </div>
+          <div class="composer">
+            <textarea placeholder="Message the agent…"></textarea>
+            <ds-button>Send</ds-button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <script type="module" src="../src/layout.js"></script>
+  </body>
+</html>

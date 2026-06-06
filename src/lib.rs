@@ -8,5 +8,4 @@
 pub mod agent;
 pub mod console;
 pub mod embed;
-pub mod mcp;
 pub mod server;

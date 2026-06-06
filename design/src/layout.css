@@ -1,0 +1,178 @@
+/* App-shell layout — the composed view: thin Files rail · Preview center ·
+   expandable Chat right. Tokens only; chrome here, component visuals in shadow
+   DOM. Loaded only by preview/layout.html. */
+
+html, body { height: 100%; }
+body.app { overflow: hidden; }
+
+.shell {
+  display: grid;
+  grid-template-rows: 52px 1fr;
+  height: 100vh;
+}
+
+/* Reuse the .topbar from styles.css for row 1. Row 2 is the three zones. */
+.zones {
+  display: grid;
+  grid-template-columns: var(--rail-w, 216px) minmax(0, 1fr) var(--chat-w, 340px);
+  min-height: 0;
+  transition: grid-template-columns 160ms ease;
+}
+.shell.rail-collapsed .zones { --rail-w: 46px; }
+.shell.chat-wide .zones { --chat-w: 560px; }
+
+.zone {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: var(--border-hairline) solid var(--color-border);
+}
+.zone:last-child { border-right: none; }
+
+.zone-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  height: 38px;
+  flex: none;
+  padding: 0 var(--space-md);
+  border-bottom: var(--border-hairline) solid var(--color-border);
+}
+.zone-title {
+  font: 400 var(--size-step-0)/1 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--color-muted);
+}
+.zone-head .grow { flex: 1; }
+.icon-btn {
+  background: transparent;
+  border: var(--border-hairline) solid transparent;
+  color: var(--color-muted);
+  border-radius: var(--radius-sm);
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  font-size: var(--size-step-2);
+  line-height: 1;
+}
+.icon-btn:hover { color: var(--color-accent); border-color: var(--color-border); }
+
+/* ── Files rail ────────────────────────────────────────────── */
+.filelist { flex: 1; overflow-y: auto; padding: var(--space-sm) var(--space-xs); }
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: var(--border-hairline) solid transparent;
+  border-radius: var(--radius-sm);
+  padding: var(--space-3xs) var(--space-sm);
+  font: 400 var(--size-step-1)/1.7 var(--font-mono);
+  color: var(--color-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-row .ic { color: var(--color-muted); flex: none; }
+.file-row.dir { color: var(--color-text); }
+.file-row:hover { background: var(--color-panel); }
+.file-row.active {
+  background: var(--color-panel);
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+.file-row.active .ic { color: var(--color-accent); }
+.file-row.indent { padding-left: var(--space-lg); }
+.shell.rail-collapsed .zone-title,
+.shell.rail-collapsed .file-row .name { display: none; }
+.shell.rail-collapsed .file-row { justify-content: center; padding-left: var(--space-sm); }
+
+/* ── Preview center ────────────────────────────────────────── */
+.preview-zone { background: var(--color-bg); }
+.viewtabs { display: flex; gap: var(--space-xs); align-items: center; }
+.seg {
+  display: inline-flex;
+  background: var(--color-bg);
+  border: var(--border-hairline) solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 2px;
+}
+.seg button {
+  background: transparent;
+  border: none;
+  color: var(--color-muted);
+  font: 400 var(--size-step-1)/1 var(--font-mono);
+  padding: var(--space-3xs) var(--space-md);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.seg button.on { background: var(--color-panel); color: var(--color-text); }
+.dev-only.hidden { display: none; }
+.device-select {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: var(--border-hairline) solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3xs) var(--space-sm);
+  font: 400 var(--size-step-1)/1 var(--font-mono);
+  cursor: pointer;
+}
+.device-select:focus { outline: none; border-color: var(--color-accent); }
+.icon-btn.on { color: var(--color-accent); border-color: var(--color-border); background: var(--color-panel); }
+.preview-body { flex: 1; min-height: 0; overflow: hidden; }
+
+/* Web view hosts the device frame, which manages its own scroll. */
+.web-view { display: none; height: 100%; }
+.web-view.on { display: block; }
+
+/* Source view */
+.src-view { display: none; height: 100%; overflow: auto; }
+.src-view.on { display: block; }
+.src-view pre {
+  margin: 0;
+  padding: var(--space-lg);
+  font: 400 var(--size-step-1)/1.7 var(--font-mono);
+  color: var(--color-text);
+  tab-size: 2;
+}
+.src-view .c { color: var(--color-muted); }
+.src-view .k { color: var(--color-accent); }
+.src-view .v { color: var(--color-text); }
+
+/* ── Chat right ────────────────────────────────────────────── */
+.chat-zone { background: var(--color-panel); }
+.chat-log {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+}
+.composer {
+  flex: none;
+  border-top: var(--border-hairline) solid var(--color-border);
+  padding: var(--space-md);
+  display: flex;
+  gap: var(--space-sm);
+  align-items: flex-end;
+}
+.composer textarea {
+  flex: 1;
+  resize: none;
+  min-height: 38px;
+  max-height: 120px;
+  background: var(--color-bg);
+  border: var(--border-hairline) solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font: 400 var(--size-step-2)/1.4 var(--font-sans);
+  padding: var(--space-sm) var(--space-md);
+  outline: none;
+}
+.composer textarea:focus { border-color: var(--color-accent); }

@@ -8,6 +8,26 @@ const props = defineProps({
   agentId: { type: String, required: true },
 });
 
+// The agent drives the live preview by writing a text marker in its reply
+// (`<!-- preview: path -->`) instead of calling a tool. We parse it out of the
+// assistant text, bubble the path up so App.vue can switch the preview pane, and
+// strip the marker so it never renders. HTML comments are invisible anyway, so a
+// stray one that slips the strip is harmless.
+const emit = defineEmits(["preview"]);
+const PREVIEW_MARKER = /<!--\s*preview:\s*([^>]*?)\s*-->/gi;
+
+// Pull every preview marker out of `text`; return the cleaned text plus the last
+// requested path (the freshest wins if the agent writes several).
+function takePreviewMarkers(text) {
+  let path = null;
+  const cleaned = text.replace(PREVIEW_MARKER, (_, p) => {
+    const trimmed = p.trim();
+    if (trimmed) path = trimmed;
+    return "";
+  });
+  return { text: cleaned.trim(), path };
+}
+
 // One conversation, rebuilt from the backend's replayed history on (re)attach.
 // Each entry is one of: system | user | assistant | thinking | tool | result |
 // permission. We render from the *authoritative* full messages (`assistant`,
@@ -79,8 +99,11 @@ function parseStreamJson(msg) {
     case "assistant": {
       const blocks = msg.message?.content ?? [];
       for (const b of blocks) {
-        if (b.type === "text" && b.text) push({ kind: "assistant", text: b.text });
-        else if (b.type === "thinking" && b.thinking) push({ kind: "thinking", text: b.thinking });
+        if (b.type === "text" && b.text) {
+          const { text, path } = takePreviewMarkers(b.text);
+          if (path) emit("preview", path);
+          if (text) push({ kind: "assistant", text });
+        } else if (b.type === "thinking" && b.thinking) push({ kind: "thinking", text: b.thinking });
         else if (b.type === "tool_use") {
           // AskUserQuestion renders as an interactive card from its paired
           // control_request (which carries the request_id we answer on); skip

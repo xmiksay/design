@@ -41,11 +41,6 @@ struct Cli {
     /// are read in order, then `--prompt` texts are appended.
     #[arg(long = "prompt-file", value_name = "PATH", env = "DESIGN_PROMPT_FILE")]
     prompt_file: Vec<PathBuf>,
-
-    /// Internal: run as the stdio MCP server (spawned by Claude Code via the
-    /// `--mcp-config` we register). Not for direct use.
-    #[arg(long = "mcp", hide = true)]
-    mcp: bool,
 }
 
 /// Sensible default allowlist when the user passes no `--allow` rules: read-only
@@ -70,17 +65,10 @@ fn default_allow() -> Vec<String> {
 fn main() -> anyhow::Result<()> {
     // Load a `.env` (from cwd, searching parent dirs) so `DESIGN_*` settings can be
     // configured there. Variables already present in the real environment win —
-    // dotenvy never overrides them, so the MCP child's injected DESIGN_PORT/
-    // DESIGN_TOKEN stay intact.
+    // dotenvy never overrides them.
     dotenvy::dotenv().ok();
 
     let cli = Cli::parse();
-
-    // MCP stdio server mode: stdout is the JSON-RPC channel, so we must NOT init a
-    // stdout logger here. Runs synchronously, no Tokio runtime.
-    if cli.mcp {
-        return design::mcp::run();
-    }
 
     tracing_subscriber::fmt()
         .with_env_filter(

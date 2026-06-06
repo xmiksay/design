@@ -84,6 +84,11 @@ cargo build
 - The Vue SPA owns the protocol: `ui/src/agent.js` (WS client) +
   `ui/src/Chat.vue` (parses stream-json, renders the chat, answers
   `control_request` permission prompts with `control_response`).
+- **Live-preview switching is a text marker, not a tool.** The agent writes
+  `<!-- preview: <path> -->` in its reply; `Chat.vue` parses it out of the
+  assistant text, strips it, and emits `preview` up to `App.vue` (`showPreview`).
+  No MCP server, no backend round-trip — keep it that way (the marker syntax is
+  defined in `src/prompts/design_system_prompt.md`).
 - Agents spawn with `--permission-prompt-tool stdio --permission-mode default
   --allowedTools <rules>`; the pre-approved set is the `--allow` CLI flag (repeatable),
   defaulting to read/edit/`Bash(npm run *)`/git-status. Anything else prompts.

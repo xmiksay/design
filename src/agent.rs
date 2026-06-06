@@ -74,12 +74,10 @@ impl AgentSpec {
         t: AgentType,
         allowed: &[String],
         resume: Option<&str>,
-        port: u16,
-        token: &str,
         extra_prompt: Option<&str>,
     ) -> Self {
         match t {
-            AgentType::ClaudeCode => Self::claude(allowed, resume, port, token, extra_prompt),
+            AgentType::ClaudeCode => Self::claude(allowed, resume, extra_prompt),
         }
     }
 
@@ -89,7 +87,7 @@ impl AgentSpec {
     /// `--allowedTools` pre-approves the user's rule set so prompts stay rare.
     /// When `resume` is set, `--resume <id>` reattaches to a prior session for this
     /// workspace (the transcript is seeded separately, see [`seed_history`]).
-    fn claude(allowed: &[String], resume: Option<&str>, port: u16, token: &str, extra_prompt: Option<&str>) -> Self {
+    fn claude(allowed: &[String], resume: Option<&str>, extra_prompt: Option<&str>) -> Self {
         // Our built-in role, plus the user's launch-time extension (`--prompt`/
         // `--prompt-file`) when given — the whole thing is appended to Claude
         // Code's default system prompt.
@@ -115,33 +113,12 @@ impl AgentSpec {
             "--append-system-prompt".into(),
             system,
         ];
-        // Pre-approve our MCP tool alongside the user's rules so a preview switch
-        // never prompts. (Always pass --allowedTools now: our tool is always in it.)
-        let mut allow = allowed.to_vec();
-        allow.push("mcp__design__show_preview".into());
-        args.push("--allowedTools".into());
-        args.push(allow.join(","));
-        // Register the design MCP server: this same binary in `--mcp` mode. It
-        // reaches back to our loopback API via the env-injected port + token.
-        // `--strict-mcp-config` keeps the user's global MCP servers out, so the
-        // agent sees only design's tools.
-        if let Ok(exe) = std::env::current_exe() {
-            let cfg = json!({
-                "mcpServers": {
-                    "design": {
-                        "type": "stdio",
-                        "command": exe.to_string_lossy(),
-                        "args": ["--mcp"],
-                        "env": {
-                            "DESIGN_PORT": port.to_string(),
-                            "DESIGN_TOKEN": token,
-                        }
-                    }
-                }
-            });
-            args.push("--mcp-config".into());
-            args.push(cfg.to_string());
-            args.push("--strict-mcp-config".into());
+        // Pre-approve the user's rule set so tool prompts stay rare. The live
+        // preview is driven by a text marker the agent writes (parsed by the SPA),
+        // so no MCP tool or extra allowlist entry is needed.
+        if !allowed.is_empty() {
+            args.push("--allowedTools".into());
+            args.push(allowed.join(","));
         }
         if let Some(id) = resume {
             args.push("--resume".into());
@@ -297,10 +274,6 @@ pub struct AgentManager {
     agents: Arc<Mutex<HashMap<Uuid, Arc<AgentSession>>>>,
     workspace: Arc<PathBuf>,
     allowed: Arc<Vec<String>>,
-    /// Loopback port + per-launch token, so spawned agents can register the design
-    /// MCP server and reach back to this server's API (see [`AgentSpec::claude`]).
-    port: u16,
-    token: Arc<String>,
     /// User-supplied system-prompt extension (`--prompt`/`--prompt-file`), appended
     /// to the built-in design prompt for every agent. `None` when not provided.
     extra_prompt: Option<Arc<String>>,
@@ -312,8 +285,6 @@ impl AgentManager {
     pub fn new(
         workspace: Arc<PathBuf>,
         allowed: Arc<Vec<String>>,
-        port: u16,
-        token: Arc<String>,
         extra_prompt: Option<Arc<String>>,
     ) -> Self {
         let (registry_tx, _) = broadcast::channel(16);
@@ -321,8 +292,6 @@ impl AgentManager {
             agents: Arc::new(Mutex::new(HashMap::new())),
             workspace,
             allowed,
-            port,
-            token,
             extra_prompt,
             registry_tx,
         }
@@ -408,8 +377,6 @@ impl AgentManager {
             agent_type,
             &self.allowed,
             resume,
-            self.port,
-            &self.token,
             self.extra_prompt.as_deref().map(String::as_str),
         );
 
@@ -575,7 +542,7 @@ fn error_message(msg: &str) -> Message {
 /// Serve one WebSocket: a multiplexed control + data channel over the agent
 /// registry. Attachments are per-socket and torn down on disconnect — agents
 /// keep running.
-pub async fn serve_socket(socket: WebSocket, manager: AgentManager, mut ui_rx: broadcast::Receiver<Value>) {
+pub async fn serve_socket(socket: WebSocket, manager: AgentManager) {
     let (mut sink, mut stream) = socket.split();
 
     // All writes to the sink funnel through one mpsc so forward tasks, control
@@ -599,9 +566,6 @@ pub async fn serve_socket(socket: WebSocket, manager: AgentManager, mut ui_rx: b
     // First paint: current agents list.
     let _ = tx.send(agents_message(&manager)).await;
 
-    // Server-pushed UI events (e.g. preview switches) are forwarded verbatim until
-    // the broadcast closes (server shutdown), after which we stop polling it.
-    let mut ui_live = true;
     loop {
         tokio::select! {
             incoming = stream.next() => {
@@ -616,13 +580,6 @@ pub async fn serve_socket(socket: WebSocket, manager: AgentManager, mut ui_rx: b
             }
             _ = registry.recv() => {
                 let _ = tx.send(agents_message(&manager)).await;
-            }
-            ui = ui_rx.recv(), if ui_live => {
-                match ui {
-                    Ok(v) => { let _ = tx.send(Message::Text(v.to_string().into())).await; }
-                    Err(broadcast::error::RecvError::Lagged(_)) => {}
-                    Err(broadcast::error::RecvError::Closed) => ui_live = false,
-                }
             }
         }
     }

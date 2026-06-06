@@ -1,0 +1,150 @@
+/* Page chrome only — layout, the tool-style topbar, section frames. Component
+   visuals live in each component's shadow DOM. All values come from tokens.css. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+/* Theme-aware native UI (scrollbars, form controls, dropdowns). */
+:root { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
+
+/* Scrollbars — token-driven so they follow the theme. */
+* { scrollbar-width: thin; scrollbar-color: var(--color-border) transparent; }
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--radius-pill);
+  border: 3px solid var(--color-bg);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--color-muted); }
+::-webkit-scrollbar-corner { background: transparent; }
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: 400 var(--size-step-2)/var(--leading-normal) var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Topbar (mirrors the tool's chrome) ────────────────────── */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xl);
+  height: 52px;
+  padding: 0 var(--space-lg);
+  border-bottom: var(--border-hairline) solid var(--color-border);
+  background: var(--color-panel);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.brand { display: flex; align-items: center; gap: var(--space-sm); }
+.brand .logo { color: var(--color-accent); font-size: var(--size-step-3); }
+.brand .wordmark { font-weight: 700; letter-spacing: var(--tracking-brand); }
+.workspace { display: flex; align-items: baseline; gap: var(--space-sm); min-width: 0; }
+.ws-label {
+  font: 400 var(--size-step-0)/1 var(--font-sans);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--color-muted);
+}
+.ws-path {
+  font: 400 var(--size-step-1)/1 var(--font-mono);
+  color: var(--color-text);
+}
+.topbar-spacer { flex: 1; }
+.phase-pill {
+  font: 400 var(--size-step-0)/1 var(--font-sans);
+  color: var(--color-muted);
+  border: var(--border-hairline) solid var(--color-border);
+  border-radius: var(--radius-pill);
+  padding: var(--space-3xs) var(--space-md);
+}
+
+/* ── Page body ─────────────────────────────────────────────── */
+.page { max-width: 960px; margin: 0 auto; padding: var(--space-2xl) var(--space-lg) var(--space-2xl); }
+
+.intro { margin-bottom: var(--space-2xl); }
+.intro h1 {
+  font: 700 var(--size-step-5)/var(--leading-tight) var(--font-sans);
+  letter-spacing: var(--tracking-brand);
+  margin: 0 0 var(--space-md);
+}
+.intro h1 .mint { color: var(--color-accent); }
+.intro p {
+  max-width: 60ch;
+  font-size: var(--size-step-3);
+  color: var(--color-muted);
+  line-height: var(--leading-snug);
+  margin: 0;
+}
+
+/* ── Sections ──────────────────────────────────────────────── */
+.section { margin-bottom: var(--space-2xl); }
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-md);
+  border-bottom: var(--border-hairline) solid var(--color-border);
+  padding-bottom: var(--space-sm);
+  margin-bottom: var(--space-lg);
+}
+.section-head .no {
+  font: 700 var(--size-step-0)/1 var(--font-mono);
+  color: var(--color-accent);
+  letter-spacing: var(--tracking-label);
+}
+.section-head h2 {
+  font: 700 var(--size-step-4)/1 var(--font-sans);
+  margin: 0;
+}
+.section-head .note {
+  margin-left: auto;
+  font: 400 var(--size-step-0)/1.4 var(--font-mono);
+  color: var(--color-muted);
+}
+
+/* ── Layout helpers ────────────────────────────────────────── */
+.grid { display: grid; gap: var(--space-lg); grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.grid.cards { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.cluster { display: flex; flex-wrap: wrap; gap: var(--space-md); align-items: center; }
+.stack { display: grid; gap: var(--space-lg); max-width: 360px; }
+.chatcol { display: grid; gap: var(--space-md); max-width: 480px; }
+
+/* Spacing ruler */
+.ruler { display: grid; gap: var(--space-sm); }
+.ruler .rule { display: flex; align-items: center; gap: var(--space-md); }
+.ruler .bar { height: 0.9rem; background: var(--color-accent); border-radius: var(--radius-sm); }
+.ruler .tag {
+  font: 400 var(--size-step-0)/1 var(--font-mono);
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  min-width: 8rem;
+}
+.ruler .tag b { color: var(--color-text); }
+
+/* Radius specimens */
+.radii { display: flex; gap: var(--space-lg); flex-wrap: wrap; }
+.radii .box {
+  width: 96px; height: 64px;
+  background: var(--color-panel);
+  border: var(--border-hairline) solid var(--color-accent);
+  display: flex; align-items: flex-end; padding: var(--space-sm);
+  font: 400 var(--size-step-0)/1 var(--font-mono);
+  color: var(--color-muted);
+}
+
+.colophon {
+  margin-top: var(--space-2xl);
+  border-top: var(--border-hairline) solid var(--color-border);
+  padding-top: var(--space-lg);
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  font: 400 var(--size-step-0)/1.5 var(--font-mono);
+  color: var(--color-muted);
+}

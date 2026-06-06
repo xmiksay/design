@@ -5,6 +5,8 @@ import "highlight.js/styles/github-dark.css";
 import FileTree from "./FileTree.vue";
 import Chat from "./Chat.vue";
 import Console from "./Console.vue";
+import ThemeSwitch from "./ThemeSwitch.vue";
+import DeviceFrame from "./DeviceFrame.vue";
 import { agentClient } from "./agent.js";
 import { computeSelector } from "./selector.js";
 
@@ -14,9 +16,22 @@ const boot = window.__DESIGN__ ?? {};
 const workspace = ref(boot.workspace ?? "(dev) ui/");
 const defaultPath = boot.previewPath ?? "preview/index.html";
 
-// Tabbed "windows", in order: chat · console · files (browser) ·
-// content (file preview) · preview (live preview).
-const activeTab = ref("chat");
+// Three-zone app shell: a thin Files rail (collapsible), a Preview center, and
+// an expandable Chat. The Preview center swaps between three views.
+const previewView = ref("web"); // web | source | console
+const railCollapsed = ref(false);
+const chatWide = ref(false);
+
+// Device-frame controls (web view only).
+const device = ref("desktop");
+const touch = ref(false);
+const DEVICES = [
+  { value: "desktop", label: "Desktop" },
+  { value: "tablet", label: "Tablet · 820×1180" },
+  { value: "tablet-sm", label: "Small tablet · 768×1024" },
+  { value: "mobile-lg", label: "Large phone · 430×932" },
+  { value: "mobile-sm", label: "Small phone · 360×740" },
+];
 
 // Live preview: an editable, workspace-relative address served via /raw/, plus a
 // cache-busting timestamp for the iframe. A fresh timestamp on every navigate /
@@ -36,20 +51,22 @@ const previewSrc = computed(() => {
 function navigate() {
   previewPath.value = addressInput.value.trim().replace(/^\/+/, "");
   reloadKey.value = Date.now();
-  activeTab.value = "preview";
+  previewView.value = "web";
 }
 function refreshPreview() {
   reloadKey.value = Date.now();
 }
 
-// The agent (via the MCP `show_preview` tool) asks to show a workspace file in
-// the live preview. Navigate the iframe there and bring the tab to the front.
+// The agent asks to show a workspace file in the live preview by writing a
+// `<!-- preview: path -->` marker in its reply (parsed by Chat.vue, emitted up
+// here). Navigate the iframe there and bring the web view to the front. A
+// leading `/raw/` is tolerated and stripped, like the editable address bar.
 function showPreview(path) {
-  const p = (path ?? "").trim().replace(/^\/+/, "");
+  const p = (path ?? "").trim().replace(/^\/+/, "").replace(/^raw\//, "");
   if (!p) return;
   previewPath.value = p; // watch(previewPath) keeps the address field in sync
   reloadKey.value = Date.now();
-  activeTab.value = "preview";
+  previewView.value = "web";
 }
 
 // Keep the editable address field in sync whenever the iframe's src changes by
@@ -62,15 +79,19 @@ watch(previewPath, (p) => {
 // The iframe serves /raw/ from the same origin, so we can reach into its
 // document directly: highlight on hover, and on click capture a CSS selector +
 // the preview path and drop them into the chat composer for the agent to act on.
-const previewFrame = ref(null);
+const deviceRef = ref(null);
 const chatRef = ref(null);
 const inspecting = ref(false);
 let inspectCleanup = null;
 let highlightEl = null;
 
+function getFrame() {
+  return deviceRef.value?.getFrame?.() ?? null;
+}
+
 function frameDoc() {
   try {
-    return previewFrame.value?.contentDocument ?? null;
+    return getFrame()?.contentDocument ?? null;
   } catch {
     return null; // cross-origin address — inspection not available
   }
@@ -128,7 +149,6 @@ async function pickElement(el) {
     `In the live preview \`/raw/${path}\`, look at the element ` +
     `\`${selector}\`: `;
   inspecting.value = false;
-  activeTab.value = "chat";
   if (!selectedAgentId.value) {
     await newChat();
     await nextTick();
@@ -174,7 +194,7 @@ function teardownInspect() {
 watch(inspecting, (on) => {
   teardownInspect();
   if (on) {
-    activeTab.value = "preview";
+    previewView.value = "web";
     nextTick(startInspect);
   }
 });
@@ -192,7 +212,7 @@ function onFrameLoad() {
 
 function syncAddressFromFrame() {
   try {
-    const loc = previewFrame.value?.contentWindow?.location;
+    const loc = getFrame()?.contentWindow?.location;
     if (!loc) return;
     let p = decodeURIComponent(loc.pathname);
     if (!p.startsWith("/raw/")) return; // off-workspace navigation: leave as-is
@@ -223,7 +243,7 @@ function extOf(path) {
 }
 
 // What a click on a file *name* does by default: things the iframe can render go
-// to the live preview; textual/code files open in the source editor; everything
+// to the live preview; textual/code files open in the source view; everything
 // else (fonts, binaries) has no default action — use the row's icons instead.
 const PREVIEW_EXT = new Set([
   "html", "htm", "pdf",
@@ -261,13 +281,7 @@ async function loadTree() {
   }
 }
 
-// Re-fetch the tree every time the File browser tab is activated, so files the
-// agent created/removed while another tab was up show up without a page reload.
-watch(activeTab, (tab) => {
-  if (tab === "files") loadTree();
-});
-
-// `mode` is "content" (source editor), "preview" (live preview), or "default"
+// `mode` is "content" (source view), "preview" (live preview), or "default"
 // (resolve from the file type). A name click sends "default"; the row icons send
 // an explicit mode.
 async function openFile(path, mode = "default") {
@@ -288,7 +302,7 @@ async function openFile(path, mode = "default") {
     const data = await res.json();
     fileContent.value = data.content;
     fileTruncated.value = data.truncated;
-    activeTab.value = "content";
+    previewView.value = "source";
   } catch {
     /* ignore */
   }
@@ -364,7 +378,6 @@ watch(
 
 onMounted(() => {
   loadTree();
-  agentClient.onPreview((frame) => showPreview(frame.path));
   agentClient.connect();
 });
 </script>
@@ -373,7 +386,7 @@ onMounted(() => {
   <div class="shell">
     <header class="topbar">
       <div class="brand">
-        <span class="logo">◳</span>
+        <span class="logo">◆</span>
         <span class="wordmark">design</span>
       </div>
       <div class="workspace" :title="workspace">
@@ -381,195 +394,212 @@ onMounted(() => {
         <code class="ws-path">{{ workspace }}</code>
       </div>
       <div class="topbar-spacer" />
-      <span class="phase-pill">localhost driver</span>
+      <ThemeSwitch />
+      <span class="status" :class="{ on: connected }">
+        <span class="status-dot" />
+        <span class="status-label">{{ connected ? "agent · live" : "connecting…" }}</span>
+      </span>
     </header>
 
-    <main class="body">
-      <section class="viewarea">
-        <div class="tabbar">
+    <div class="zones" :class="{ 'rail-collapsed': railCollapsed, 'chat-wide': chatWide }">
+      <!-- Files (thin, collapsible) -->
+      <section class="zone files-zone">
+        <div class="zone-head">
+          <span class="zone-title">Files</span>
+          <span class="grow" />
           <button
-            class="tab"
-            :class="{ active: activeTab === 'chat' }"
-            @click="activeTab = 'chat'"
-          >
-            <span class="conn" :class="{ on: connected }" /> Chat
-          </button>
-          <button
-            class="tab"
-            :class="{ active: activeTab === 'console' }"
-            @click="activeTab = 'console'"
-          >
-            ▷_ Console
-          </button>
-          <button
-            class="tab"
-            :class="{ active: activeTab === 'files' }"
-            @click="activeTab = 'files'"
-          >
-            ☰ File browser
-          </button>
-          <button
-            class="tab"
-            :class="{ active: activeTab === 'content' }"
-            :disabled="!selectedPath"
-            @click="activeTab = 'content'"
-          >
-            ‹/› {{ selectedPath ? "File preview · " + selectedPath : "File preview" }}
-          </button>
-          <button
-            class="tab"
-            :class="{ active: activeTab === 'preview' }"
-            @click="activeTab = 'preview'"
-          >
-            <span class="dot" /> Live preview
-          </button>
-
-          <div class="toolbar-spacer" />
-          <form
-            v-if="activeTab === 'preview'"
-            class="address"
-            @submit.prevent="navigate"
-          >
-            <span class="address-prefix">/raw/</span>
-            <input
-              v-model="addressInput"
-              class="address-input"
-              spellcheck="false"
-              title="Edit the iframe address (workspace-relative), Enter to go"
-            />
-          </form>
-          <button
-            v-if="activeTab === 'preview'"
-            class="refresh-btn inspect-btn"
-            :class="{ active: inspecting }"
-            title="Object inspect: click an element to reference it in chat"
-            @click="inspecting = !inspecting"
-          >
-            ⌖
-          </button>
-          <button
-            v-if="activeTab === 'preview'"
-            class="refresh-btn"
-            title="Reload preview"
-            @click="refreshPreview"
-          >
-            ⟳
-          </button>
-          <button
-            v-if="activeTab === 'files'"
-            class="refresh-btn"
+            v-if="!railCollapsed"
+            class="icon-btn"
             title="Refresh file tree"
             @click="loadTree"
           >
             ⟳
           </button>
+          <button
+            class="icon-btn"
+            :title="railCollapsed ? 'Expand' : 'Collapse'"
+            @click="railCollapsed = !railCollapsed"
+          >
+            {{ railCollapsed ? "⟩" : "⟨" }}
+          </button>
         </div>
-
-        <!-- Window: Chat -->
-        <div class="window chatwin" v-show="activeTab === 'chat'">
-          <div class="chat-bar">
-            <select v-model="newAgentType" class="agent-select">
-              <option value="claude-code">Claude Code</option>
-            </select>
-            <button class="new-chat-btn" :disabled="!connected" @click="newChat">+ New chat</button>
-            <div class="resume-wrap">
-              <button class="resume-btn" :disabled="!connected" title="Resume a past Claude chat in this workspace" @click="toggleResume">
-                ⤺ Resume
-              </button>
-              <div v-if="showResume" class="resume-menu">
-                <p v-if="loadingSessions" class="resume-empty">Loading…</p>
-                <p v-else-if="!sessions.length" class="resume-empty">No past chats for this workspace.</p>
-                <button
-                  v-for="s in sessions"
-                  :key="s.id"
-                  class="resume-item"
-                  :title="s.id"
-                  @click="resumeChat(s.id)"
-                >
-                  <span class="resume-title">{{ s.title }}</span>
-                  <span class="resume-age">{{ ago(s.mtime) }}</span>
-                </button>
-              </div>
-            </div>
-            <div class="chat-tabs">
-              <div
-                v-for="a in agents"
-                :key="a.id"
-                class="chat-tab"
-                :class="{ active: a.id === selectedAgentId }"
-                @click="selectChat(a.id)"
-              >
-                <span class="chat-tab-label">{{ a.agentType }} · {{ shortId(a.id) }}</span>
-                <span v-if="a.chats > 1" class="chat-tab-badge" title="active views">{{ a.chats }}</span>
-                <button class="chat-close" title="Close chat (terminates the agent)" @click.stop="closeChat(a.id)">×</button>
-              </div>
-            </div>
-          </div>
-          <div class="chat-host">
-            <Chat v-if="selectedAgentId" ref="chatRef" :key="selectedAgentId" :agent-id="selectedAgentId" />
-            <div v-else class="chat-empty">
-              <p class="placeholder">
-                No chat selected. Start one with <strong>+ New chat</strong> to drive an agent
-                against this workspace.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Window: Console -->
-        <div class="window consolewin" v-show="activeTab === 'console'">
-          <Console />
-        </div>
-
-        <!-- Window: Live preview -->
-        <div class="window frame" v-show="activeTab === 'preview'">
-          <iframe
-            ref="previewFrame"
-            :src="previewSrc"
-            title="Design preview"
-            frameborder="0"
-            @load="onFrameLoad"
+        <div v-show="!railCollapsed" class="files-scroll">
+          <FileTree
+            v-if="tree && tree.children"
+            :nodes="tree.children"
+            :selected="selectedPath"
+            @open="openFile"
           />
+          <p v-else class="placeholder">Loading workspace…</p>
         </div>
+      </section>
 
-        <!-- Window 2: File content -->
-        <div class="window code" v-show="activeTab === 'content'">
-          <template v-if="selectedPath">
-            <p v-if="fileTruncated" class="truncated">⚠ file truncated</p>
-            <pre><code class="hljs" v-html="highlighted"></code></pre>
+      <!-- Preview (web / source / console) -->
+      <section class="zone preview-zone">
+        <div class="zone-head">
+          <div class="seg">
+            <button :class="{ on: previewView === 'web' }" @click="previewView = 'web'">web</button>
+            <button :class="{ on: previewView === 'source' }" @click="previewView = 'source'">source</button>
+            <button :class="{ on: previewView === 'console' }" @click="previewView = 'console'">console</button>
+          </div>
+          <template v-if="previewView === 'web'">
+            <select v-model="device" class="device-select" title="Device size">
+              <option v-for="d in DEVICES" :key="d.value" :value="d.value">{{ d.label }}</option>
+            </select>
+            <button
+              class="icon-btn"
+              :class="{ on: touch }"
+              title="Touch cursor"
+              @click="touch = !touch"
+            >
+              ☝
+            </button>
           </template>
-          <p v-else class="placeholder">Select a file in the Files tab.</p>
+          <span class="grow" />
+          <template v-if="previewView === 'web'">
+            <form class="address" @submit.prevent="navigate">
+              <span class="address-prefix">/raw/</span>
+              <input
+                v-model="addressInput"
+                class="address-input"
+                spellcheck="false"
+                title="Edit the iframe address (workspace-relative), Enter to go"
+              />
+            </form>
+            <button
+              class="icon-btn"
+              :class="{ on: inspecting }"
+              title="Object inspect: click an element to reference it in chat"
+              @click="inspecting = !inspecting"
+            >
+              ⌖
+            </button>
+            <button class="icon-btn" title="Reload preview" @click="refreshPreview">⟳</button>
+          </template>
+          <span v-else-if="previewView === 'source'" class="src-path">
+            {{ selectedPath || "no file selected" }}
+          </span>
         </div>
 
-        <!-- Window 3: File list -->
-        <div class="window files" v-show="activeTab === 'files'">
-          <div class="files-scroll">
-            <FileTree
-              v-if="tree && tree.children"
-              :nodes="tree.children"
-              :selected="selectedPath"
-              @open="openFile"
+        <div class="preview-body">
+          <!-- Web view -->
+          <div v-show="previewView === 'web'" class="web-view">
+            <DeviceFrame
+              ref="deviceRef"
+              :src="previewSrc"
+              :device="device"
+              :touch="touch"
+              @load="onFrameLoad"
             />
-            <p v-else class="placeholder">Loading workspace…</p>
+          </div>
+
+          <!-- Source view -->
+          <div v-show="previewView === 'source'" class="src-view">
+            <template v-if="selectedPath">
+              <p v-if="fileTruncated" class="truncated">⚠ file truncated</p>
+              <pre><code class="hljs" v-html="highlighted"></code></pre>
+            </template>
+            <p v-else class="placeholder">Open a file from the Files rail (‹/›) to view its source.</p>
+          </div>
+
+          <!-- Console view -->
+          <div v-show="previewView === 'console'" class="console-view">
+            <Console />
           </div>
         </div>
       </section>
-    </main>
+
+      <!-- Chat (always present, expandable) -->
+      <section class="zone chat-zone">
+        <div class="zone-head">
+          <span class="zone-title">Chat</span>
+          <span class="grow" />
+          <button
+            class="icon-btn"
+            :title="chatWide ? 'Shrink' : 'Expand'"
+            @click="chatWide = !chatWide"
+          >
+            {{ chatWide ? "⤡" : "⤢" }}
+          </button>
+        </div>
+
+        <div class="chat-controls">
+          <select v-model="newAgentType" class="agent-select">
+            <option value="claude-code">Claude Code</option>
+          </select>
+          <button class="new-chat-btn" :disabled="!connected" @click="newChat">+ New</button>
+          <div class="resume-wrap">
+            <button
+              class="resume-btn"
+              :disabled="!connected"
+              title="Resume a past Claude chat in this workspace"
+              @click="toggleResume"
+            >
+              ⤺ Resume
+            </button>
+            <div v-if="showResume" class="resume-menu">
+              <p v-if="loadingSessions" class="resume-empty">Loading…</p>
+              <p v-else-if="!sessions.length" class="resume-empty">No past chats for this workspace.</p>
+              <button
+                v-for="s in sessions"
+                :key="s.id"
+                class="resume-item"
+                :title="s.id"
+                @click="resumeChat(s.id)"
+              >
+                <span class="resume-title">{{ s.title }}</span>
+                <span class="resume-age">{{ ago(s.mtime) }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="agents.length" class="chat-tabs">
+          <div
+            v-for="a in agents"
+            :key="a.id"
+            class="chat-tab"
+            :class="{ active: a.id === selectedAgentId }"
+            @click="selectChat(a.id)"
+          >
+            <span class="chat-tab-label">{{ shortId(a.id) }}</span>
+            <span v-if="a.chats > 1" class="chat-tab-badge" title="active views">{{ a.chats }}</span>
+            <button class="chat-close" title="Close chat (terminates the agent)" @click.stop="closeChat(a.id)">×</button>
+          </div>
+        </div>
+
+        <div class="chat-host">
+          <Chat
+            v-if="selectedAgentId"
+            ref="chatRef"
+            :key="selectedAgentId"
+            :agent-id="selectedAgentId"
+            @preview="showPreview"
+          />
+          <div v-else class="chat-empty">
+            <p class="placeholder">
+              No chat selected. Start one with <strong>+ New</strong> to drive an agent
+              against this workspace.
+            </p>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .shell {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: 52px 1fr;
   height: 100%;
 }
 
+/* ── Topbar ────────────────────────────────────────────────── */
 .topbar {
   display: flex;
   align-items: center;
   gap: 1.5rem;
-  height: 52px;
   padding: 0 1rem;
   border-bottom: 1px solid var(--tool-border);
   background: var(--tool-panel);
@@ -610,54 +640,243 @@ onMounted(() => {
 .topbar-spacer {
   flex: 1;
 }
-.phase-pill {
-  font-size: 0.7rem;
-  color: var(--tool-muted);
-  border: 1px solid var(--tool-border);
-  border-radius: 999px;
-  padding: 0.2rem 0.6rem;
-}
-
-.body {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-}
-
-/* Chat window: a switcher bar on top, the conversation below. */
-.chat-bar {
-  display: flex;
+.status {
+  display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 0.5rem;
-  padding: 0.6rem 0.85rem;
-  border-bottom: 1px solid var(--tool-border);
 }
-.conn {
-  display: inline-block;
+.status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--tool-muted);
 }
-.conn.on {
+.status.on .status-dot {
   background: var(--tool-accent);
-  box-shadow: 0 0 7px var(--tool-accent);
+  box-shadow: 0 0 8px var(--tool-accent);
+}
+.status-label {
+  font-family: var(--tool-mono);
+  font-size: 0.72rem;
+  color: var(--tool-muted);
+}
+.status.on .status-label {
+  color: var(--tool-text);
+}
+
+/* ── Zones grid ────────────────────────────────────────────── */
+.zones {
+  display: grid;
+  grid-template-columns: var(--rail-w, 216px) minmax(0, 1fr) var(--chat-w, 360px);
+  min-height: 0;
+  transition: grid-template-columns 160ms ease;
+}
+.zones.rail-collapsed {
+  --rail-w: 46px;
+}
+.zones.chat-wide {
+  --chat-w: 560px;
+}
+.zone {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--tool-border);
+}
+.zone:last-child {
+  border-right: none;
+}
+.zone-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 38px;
+  flex: none;
+  padding: 0 0.7rem;
+  border-bottom: 1px solid var(--tool-border);
+}
+.zone-title {
+  font-family: var(--tool-mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--tool-muted);
+}
+.zone-head .grow {
+  flex: 1;
+}
+.icon-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--tool-muted);
+  border-radius: 4px;
+  min-width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.86rem;
+  line-height: 1;
+  padding: 0 0.3rem;
+}
+.icon-btn:hover {
+  color: var(--tool-accent);
+  border-color: var(--tool-border);
+}
+.icon-btn.on {
+  color: var(--tool-accent);
+  border-color: var(--tool-border);
+  background: var(--tool-panel);
+}
+
+/* ── Files rail ────────────────────────────────────────────── */
+.files-zone {
+  background: var(--tool-panel);
+}
+.files-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0.5rem 0.4rem;
+}
+
+/* ── Preview center ────────────────────────────────────────── */
+.preview-zone {
+  background: var(--tool-bg);
+}
+.seg {
+  display: inline-flex;
+  background: var(--tool-bg);
+  border: 1px solid var(--tool-border);
+  border-radius: 7px;
+  padding: 2px;
+}
+.seg button {
+  background: transparent;
+  border: none;
+  color: var(--tool-muted);
+  font-family: var(--tool-mono);
+  font-size: 0.78rem;
+  padding: 0.2rem 0.7rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.seg button.on {
+  background: var(--tool-panel);
+  color: var(--tool-text);
+}
+.device-select {
+  background: var(--tool-bg);
+  color: var(--tool-text);
+  border: 1px solid var(--tool-border);
+  border-radius: 7px;
+  padding: 0.2rem 0.4rem;
+  font-family: var(--tool-mono);
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+.device-select:focus {
+  outline: none;
+  border-color: var(--tool-accent);
+}
+.src-path {
+  font-family: var(--tool-mono);
+  font-size: 0.74rem;
+  color: var(--tool-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.address {
+  display: flex;
+  align-items: center;
+  background: var(--tool-bg);
+  border: 1px solid var(--tool-border);
+  border-radius: 7px;
+  padding: 0 0.4rem;
+  height: 28px;
+  min-width: 12rem;
+  max-width: 26rem;
+  flex: 0 1 20rem;
+}
+.address:focus-within {
+  border-color: var(--tool-accent);
+}
+.address-prefix {
+  font-family: var(--tool-mono);
+  font-size: 0.76rem;
+  color: var(--tool-muted);
+}
+.address-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--tool-text);
+  font-family: var(--tool-mono);
+  font-size: 0.78rem;
+  padding: 0 0.2rem;
+}
+.preview-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.web-view {
+  height: 100%;
+}
+.src-view {
+  height: 100%;
+  overflow: auto;
+  padding: 1rem;
+}
+.src-view .truncated {
+  color: var(--tool-danger);
+  font-size: 0.8rem;
+  margin: 0 0 0.5rem;
+}
+.src-view pre {
+  margin: 0;
+  font-family: var(--tool-mono);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--tool-text);
+  white-space: pre;
+}
+.console-view {
+  height: 100%;
+}
+
+/* ── Chat right ────────────────────────────────────────────── */
+.chat-zone {
+  background: var(--tool-panel);
+}
+.chat-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  flex: none;
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid var(--tool-border);
 }
 .agent-select {
   background: var(--tool-bg);
   color: var(--tool-text);
   border: 1px solid var(--tool-border);
   border-radius: 7px;
-  padding: 0.4rem 0.5rem;
-  font-size: 0.82rem;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.78rem;
 }
 .new-chat-btn {
   background: var(--tool-accent);
   color: var(--tool-accent-ink);
   border: none;
   border-radius: 7px;
-  padding: 0.4rem 0.7rem;
+  padding: 0.3rem 0.7rem;
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
@@ -674,7 +893,7 @@ onMounted(() => {
   color: var(--tool-text);
   border: 1px solid var(--tool-border);
   border-radius: 7px;
-  padding: 0.4rem 0.7rem;
+  padding: 0.3rem 0.7rem;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
@@ -690,9 +909,9 @@ onMounted(() => {
 .resume-menu {
   position: absolute;
   top: calc(100% + 0.35rem);
-  left: 0;
+  right: 0;
   z-index: 20;
-  width: 22rem;
+  width: 20rem;
   max-height: 20rem;
   overflow-y: auto;
   background: var(--tool-panel);
@@ -740,6 +959,9 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
+  flex: none;
+  padding: 0.45rem 0.7rem;
+  border-bottom: 1px solid var(--tool-border);
 }
 .chat-tab {
   display: flex;
@@ -779,11 +1001,6 @@ onMounted(() => {
 .chat-close:hover {
   color: var(--tool-danger);
 }
-.window.chatwin,
-.window.consolewin {
-  display: flex;
-  flex-direction: column;
-}
 .chat-host {
   flex: 1;
   min-height: 0;
@@ -798,150 +1015,5 @@ onMounted(() => {
   color: var(--tool-muted);
   line-height: 1.5;
   padding: 0.5rem 0.25rem;
-}
-
-/* Right pane: tab bar + the three windows. */
-.viewarea {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  background: var(--tool-bg);
-}
-.tabbar {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  height: 42px;
-  padding: 0 0.75rem;
-  border-bottom: 1px solid var(--tool-border);
-}
-.tab {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  background: transparent;
-  color: var(--tool-muted);
-  border: 1px solid transparent;
-  border-radius: 7px;
-  padding: 0.3rem 0.65rem;
-  font-family: var(--tool-mono);
-  font-size: 0.78rem;
-  cursor: pointer;
-  max-width: 24rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.tab.active {
-  color: var(--tool-text);
-  border-color: var(--tool-border);
-  background: var(--tool-panel);
-}
-.tab:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--tool-accent);
-  box-shadow: 0 0 8px var(--tool-accent);
-}
-.toolbar-spacer {
-  flex: 1;
-}
-.address {
-  display: flex;
-  align-items: center;
-  background: var(--tool-bg);
-  border: 1px solid var(--tool-border);
-  border-radius: 7px;
-  padding: 0 0.4rem;
-  height: 28px;
-  min-width: 14rem;
-  max-width: 28rem;
-  flex: 0 1 22rem;
-}
-.address:focus-within {
-  border-color: var(--tool-accent);
-}
-.address-prefix {
-  font-family: var(--tool-mono);
-  font-size: 0.76rem;
-  color: var(--tool-muted);
-}
-.address-input {
-  flex: 1;
-  min-width: 0;
-  background: transparent;
-  border: none;
-  outline: none;
-  color: var(--tool-text);
-  font-family: var(--tool-mono);
-  font-size: 0.78rem;
-  padding: 0 0.2rem;
-}
-.refresh-btn {
-  background: transparent;
-  color: var(--tool-text);
-  border: 1px solid var(--tool-border);
-  border-radius: 7px;
-  padding: 0.3rem 0.6rem;
-  font-size: 0.9rem;
-  line-height: 1;
-  cursor: pointer;
-}
-.refresh-btn:hover {
-  border-color: var(--tool-accent);
-  color: var(--tool-accent);
-}
-.inspect-btn.active {
-  border-color: var(--tool-accent);
-  background: var(--tool-accent);
-  color: var(--tool-accent-ink);
-}
-
-.window {
-  flex: 1;
-  min-height: 0;
-}
-.window.frame {
-  padding: 1rem;
-}
-.window.frame iframe {
-  width: 100%;
-  height: 100%;
-  border-radius: 10px;
-  background: #fff;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
-}
-.window.code {
-  overflow: auto;
-  padding: 1rem;
-}
-.window.code .truncated {
-  color: var(--tool-danger);
-  font-size: 0.8rem;
-  margin: 0 0 0.5rem;
-}
-.window.code pre {
-  margin: 0;
-  font-family: var(--tool-mono);
-  font-size: 0.8rem;
-  line-height: 1.5;
-  color: var(--tool-text);
-  white-space: pre;
-}
-.window.files {
-  display: flex;
-  flex-direction: column;
-}
-.files-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 0.5rem 0.75rem;
 }
 </style>

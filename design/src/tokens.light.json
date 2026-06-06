@@ -1,0 +1,14 @@
+{
+  "color": {
+    "$type": "color",
+    "$description": "Light theme — overrides only the base color tokens. The semantic layer (button/bubble/control) references these via var(), so it re-themes automatically.",
+    "bg":          { "$value": "#f5f6f8" },
+    "panel":       { "$value": "#ffffff" },
+    "border":      { "$value": "#e2e5ea" },
+    "text":        { "$value": "#16181d" },
+    "muted":       { "$value": "#586273" },
+    "accent":      { "$value": "#0c9268" },
+    "accent-soft": { "$value": "#d7f1e7" },
+    "danger":      { "$value": "#d64545" }
+  }
+}

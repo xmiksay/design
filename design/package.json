@@ -1,0 +1,10 @@
+{
+  "name": "format-design-system",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Format — an editorial studio design system. Native Web Components themed by DTCG tokens. No build step; node only compiles tokens.",
+  "scripts": {
+    "tokens": "node build.mjs"
+  }
+}

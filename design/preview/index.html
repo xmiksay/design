@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>design — UI system</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../src/tokens.css" />
+    <link rel="stylesheet" href="../src/styles.css" />
+  </head>
+  <body>
+    <!-- Topbar — the same chrome the driver SPA wears -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">◆</span>
+        <span class="wordmark">design</span>
+      </div>
+      <div class="workspace">
+        <span class="ws-label">workspace</span>
+        <span class="ws-path">./design</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <ds-switch data-theme-switch label="Light"></ds-switch>
+      <span class="phase-pill">UI system · v0.1</span>
+    </header>
+
+    <main class="page">
+      <section class="intro">
+        <h1>The driver UI, <span class="mint">codified</span>.</h1>
+        <p>
+          A design system reverse-engineered from the <code>design</code> tool's
+          own Vue SPA — its dark slate surfaces, mint accent, mono labels and
+          pill controls, pinned to DTCG tokens. Edit a token, recompile, refresh.
+        </p>
+      </section>
+
+      <!-- 01 Palette -->
+      <section class="section">
+        <div class="section-head">
+          <span class="no">01</span>
+          <h2>Palette</h2>
+          <span class="note">color.* — DTCG source of truth</span>
+        </div>
+        <div class="grid">
+          <ds-swatch token="color-bg" value="#15171c"></ds-swatch>
+          <ds-swatch token="color-panel" value="#1c1f26"></ds-swatch>
+          <ds-swatch token="color-border" value="#2a2e38"></ds-swatch>
+          <ds-swatch token="color-text" value="#e7e9ee"></ds-swatch>
+          <ds-swatch token="color-muted" value="#8b93a3"></ds-swatch>
+          <ds-swatch token="color-accent" value="#6ee7b7"></ds-swatch>
+          <ds-swatch token="color-accent-ink" value="#08130d"></ds-swatch>
+          <ds-swatch token="color-danger" value="#f87171"></ds-swatch>
+        </div>
+      </section>
+
+      <!-- 02 Type -->
+      <section class="section">
+        <div class="section-head">
+          <span class="no">02</span>
+          <h2>Type</h2>
+          <span class="note">system-ui · JetBrains Mono</span>
+        </div>
+        <ds-specimen step="size-step-5" font="sans" weight="700" sample="System sans, bold"></ds-specimen>
+        <ds-specimen step="size-step-4" font="sans" weight="700" sample="Section heading"></ds-specimen>
+        <ds-specimen step="size-step-3" font="sans" sample="Logo and lead size"></ds-specimen>
+        <ds-specimen step="size-step-2" font="sans" sample="Body & chat — the quick brown fox jumps over the lazy dog."></ds-specimen>
+        <ds-specimen step="size-step-1" font="mono" sample="mono control / path text"></ds-specimen>
+        <ds-specimen step="size-step--1" font="mono" sample="LABEL — MONO, UPPERCASE, TRACKED OUT"></ds-specimen>
+      </section>
+
+      <!-- 03 Controls -->
+      <section class="section">
+        <div class="section-head">
+          <span class="no">03</span>
+          <h2>Controls</h2>
+          <span class="note">buttons · tabs · status · badges</span>
+        </div>
+        <div class="cluster" style="margin-bottom: var(--space-xl)">
+          <ds-button variant="solid">New chat</ds-button>
+          <ds-button variant="ghost">Resume</ds-button>
+          <ds-button variant="danger">Stop</ds-button>
+          <ds-button variant="solid" disabled>Disabled</ds-button>
+        </div>
+        <div class="cluster" style="margin-bottom: var(--space-xl)">
+          <ds-tab active>chat</ds-tab>
+          <ds-tab count="3" closable>agent · 2f9c</ds-tab>
+          <ds-tab>console</ds-tab>
+          <ds-status on>connected</ds-status>
+          <ds-status>offline</ds-status>
+          <ds-badge>12</ds-badge>
+          <ds-badge tone="neutral">draft</ds-badge>
+          <ds-badge tone="danger">err</ds-badge>
+        </div>
+        <div class="stack">
+          <ds-field label="Live preview" prefix="/raw/" placeholder="preview/index.html"></ds-field>
+          <ds-field label="Workspace" value="./design" hint="The folder the tool is driving."></ds-field>
+        </div>
+      </section>
+
+      <!-- 04 Surfaces -->
+      <section class="section">
+        <div class="section-head">
+          <span class="no">04</span>
+          <h2>Surfaces</h2>
+          <span class="note">panels · chat bubbles</span>
+        </div>
+        <div class="grid cards" style="margin-bottom: var(--space-xl)">
+          <ds-card eyebrow="Source of truth" heading="Tokens">
+            Every value comes from <code>tokens.json</code>, compiled to CSS
+            custom properties. Components read <code>var(--token)</code>.
+          </ds-card>
+          <ds-card eyebrow="Buildless" heading="Web Components">
+            Native custom elements, no framework — the substrate stays workable by
+            any agent, editor or browser.
+          </ds-card>
+          <ds-card eyebrow="Faithful" heading="The real UI">
+            Lifted from the driver SPA so the kit and the tool always read as one
+            product.
+          </ds-card>
+        </div>
+        <div class="chatcol">
+          <ds-message role="assistant">Pointed the live preview at <code>design/preview/index.html</code>.</ds-message>
+          <ds-message role="user">Show me the palette section.</ds-message>
+          <ds-message role="queued">…and the type scale</ds-message>
+        </div>
+      </section>
+
+      <!-- 05 Spacing & radius -->
+      <section class="section">
+        <div class="section-head">
+          <span class="no">05</span>
+          <h2>Spacing &amp; radius</h2>
+          <span class="note">space.* · radius.*</span>
+        </div>
+        <div class="ruler" style="margin-bottom: var(--space-xl)">
+          <div class="rule"><span class="tag"><b>xs</b> 0.4rem</span><span class="bar" style="width: var(--space-xs)"></span></div>
+          <div class="rule"><span class="tag"><b>sm</b> 0.5rem</span><span class="bar" style="width: var(--space-sm)"></span></div>
+          <div class="rule"><span class="tag"><b>md</b> 0.7rem</span><span class="bar" style="width: var(--space-md)"></span></div>
+          <div class="rule"><span class="tag"><b>lg</b> 1rem</span><span class="bar" style="width: var(--space-lg)"></span></div>
+          <div class="rule"><span class="tag"><b>xl</b> 1.5rem</span><span class="bar" style="width: var(--space-xl)"></span></div>
+          <div class="rule"><span class="tag"><b>2xl</b> 2rem</span><span class="bar" style="width: var(--space-2xl)"></span></div>
+        </div>
+        <div class="radii">
+          <div class="box" style="border-radius: var(--radius-sm)">sm 4</div>
+          <div class="box" style="border-radius: var(--radius-md)">md 7</div>
+          <div class="box" style="border-radius: var(--radius-lg)">lg 9</div>
+          <div class="box" style="border-radius: var(--radius-xl)">xl 10</div>
+          <div class="box" style="border-radius: var(--radius-pill); width: 64px">pill</div>
+        </div>
+      </section>
+
+      <footer class="colophon">
+        <span>design — UI system</span>
+        <span>tokens.json → tokens.css → components</span>
+      </footer>
+    </main>
+
+    <script type="module" src="../src/main.js"></script>
+  </body>
+</html>

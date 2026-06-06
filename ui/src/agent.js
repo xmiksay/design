@@ -23,8 +23,6 @@ function makeClient() {
   const outputSubs = new Map();
   // Console output subscribers (Console.vue).
   const consoleSubs = new Set();
-  // Server-pushed UI-control subscribers (e.g. agent "show preview" → App.vue).
-  const previewSubs = new Set();
   // ids we want to stay attached to, so we can re-attach after a reconnect.
   const wanted = new Set();
   // one-shot resolvers waiting for the next `spawned` frame.
@@ -104,9 +102,6 @@ function makeClient() {
       case "console.output":
       case "console.exit":
         for (const fn of consoleSubs) fn(frame);
-        break;
-      case "preview":
-        for (const fn of previewSubs) fn(frame);
         break;
       case "error":
         // Surface protocol errors on the console; Chat shows agent-level issues.
@@ -194,13 +189,6 @@ function makeClient() {
     return () => consoleSubs.delete(fn);
   }
 
-  // ---- server-pushed UI control (agent → SPA) ----
-
-  function onPreview(fn) {
-    previewSubs.add(fn);
-    return () => previewSubs.delete(fn);
-  }
-
   return {
     state,
     connect,
@@ -215,7 +203,6 @@ function makeClient() {
     consoleRun,
     consoleKill,
     onConsole,
-    onPreview,
   };
 }
 

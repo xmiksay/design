@@ -6,13 +6,55 @@
   --tool-muted: #8b93a3;
   --tool-accent: #6ee7b7;
   --tool-accent-ink: #08130d;
+  --tool-accent-soft: #2e4b46;
   --tool-danger: #f87171;
   --tool-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
   --tool-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+
+/* Light theme — overrides only the base colors; the rest cascades. Mirrors the
+   design system's tokens.light.json. Driven by ThemeSwitch toggling
+   [data-theme="light"] on <html>. */
+:root[data-theme="light"] {
+  --tool-bg: #f5f6f8;
+  --tool-panel: #ffffff;
+  --tool-border: #e2e5ea;
+  --tool-text: #16181d;
+  --tool-muted: #586273;
+  --tool-accent: #0c9268;
+  --tool-accent-ink: #ffffff;
+  --tool-accent-soft: #d7f1e7;
+  --tool-danger: #d64545;
+  color-scheme: light;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Themed scrollbars — follow the palette in either theme. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--tool-border) transparent;
+}
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--tool-border);
+  border-radius: 999px;
+  border: 3px solid var(--tool-bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--tool-muted);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 html,
