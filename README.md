@@ -11,6 +11,32 @@ You open the printed `http://127.0.0.1:…` URL, chat with an agent that edits t
 workspace, run shell commands, browse files, and watch a live preview — all
 against a repo that stays workable without the tool.
 
+## Screenshots
+
+Driving an agent against the sample design system: the chat edits the workspace
+and flips the live preview to the components page, all in one loop.
+
+![Chat driving the live preview](docs/screenshots/chat.png)
+
+<table>
+<tr>
+<td width="50%">
+
+**Source view** — any workspace file, syntax highlighted.
+
+![Source view](docs/screenshots/source.png)
+
+</td>
+<td width="50%">
+
+**Console** — `bash -lc` in the workspace, streamed live.
+
+![Console view](docs/screenshots/console.png)
+
+</td>
+</tr>
+</table>
+
 ## The idea
 
 The shareable artifact is the **repo**, not the tool. `design` is a disposable,
