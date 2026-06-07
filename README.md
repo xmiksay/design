@@ -111,22 +111,21 @@ example/            # sample substrate: Web Components + DTCG tokens
 
 ## Build & run
 
-The SPA is embedded into the binary at compile time, so build it **before**
-`cargo build`. The sample substrate is buildless apart from compiling its tokens.
+The SPA is embedded into the binary at compile time, so it must be built
+**before** `cargo build`. All flows go through the **`Makefile`**, which enforces
+that ordering:
 
 ```sh
-# 1. Build the driver SPA (produces ui/dist, embedded by rust-embed)
-cd ui && npm install && npm run build && cd ..
-
-# 2. (sample only) compile the substrate's tokens → example/src/tokens.css
-cd example && npm run tokens && cd ..
-
-# 3. Build and run the tool against any folder
-cargo build
-./target/debug/design ./example
+make run                 # build ui/dist + run the tool on ./example
+make run FOLDER=./path   # …or against any folder
+make build               # build the SPA, then the binary
+make tokens              # (sample only) compile example/src/tokens.css
+make verify              # lint + tests
+make                     # list all targets
 ```
 
-Open the printed URL. Ctrl-C stops the server cleanly.
+Open the printed URL. Ctrl-C stops the server cleanly. Run `nvm use` first if
+needed (Node is pinned in `.nvmrc`).
 
 By default the server binds a random free loopback port. Pin one with `-p`:
 

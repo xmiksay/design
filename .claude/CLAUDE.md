@@ -7,24 +7,27 @@ imposes no substrate format or build.** `example/` is just a sample design syste
 (currently DTCG tokens + native Web Components); treat it as a suggestion, not a
 contract.
 
-Read [README.md](README.md) for the project rationale and status.
+Read [README.md](../README.md) for the project rationale and status.
 
 ## Build & run
 
-The Vue SPA is embedded via rust-embed (`#[folder = "ui/dist"]`), so **`ui/dist`
-must exist before `cargo build`**. The tool runs on any folder; the `example/`
-sample only needs `npm run tokens` to generate its `src/tokens.css`.
+All build/run flows go through the **`Makefile`**. The Vue SPA is embedded via
+rust-embed (`#[folder = "ui/dist"]`), so **`ui/dist` must exist before `cargo
+build`** — the targets enforce that ordering. The tool runs on any folder; the
+`example/` sample needs `make tokens` to generate its `src/tokens.css`.
 
 ```sh
-cd ui && npm run build && cd ..           # produces ui/dist (embedded)
-cd example && npm run tokens && cd ..      # compiles example/src/tokens.css (sample)
-cargo build
-./target/debug/design ./example           # the only arg is the workspace folder
+make run                 # build ui/dist + run the tool on ./example
+make run FOLDER=./path   # …or on any workspace folder
+make build               # build SPA + cargo build
+make dev                 # hot-reload SPA (vite)
+make verify              # pre-"done" gate: lint + tests
+make tokens              # (sample) regenerate example/src/tokens.css
 ```
 
-- Run `cargo build` after Rust changes; `npm run build` in `ui/` after SPA
-  changes (then rebuild the binary so the new SPA is embedded).
-- `nvm use` before npm if the project ever pins a Node version.
+- `nvm use` before npm (Node pinned in `.nvmrc`). `/check` is the skill wrapper
+  around `make verify`.
+- No Rust tests yet — `make test-unit` / `test-integration` are wired but empty.
 
 ## Architecture
 
@@ -71,7 +74,8 @@ cargo build
 
 ## Commits
 
-- **Do not add a `Co-Authored-By` footer** (user preference).
+- **Do not add a `Co-Authored-By` footer** (user preference; see workspace
+  `CLAUDE.md` → *Git Workflow*).
 - Commit only when asked.
 
 ## Agent connection (built)
