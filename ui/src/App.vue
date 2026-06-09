@@ -144,16 +144,12 @@ function onInspectClick(e) {
 
 async function pickElement(el) {
   const selector = computeSelector(el);
-  const path = previewPath.value;
-  const text =
-    `In the live preview \`/raw/${path}\`, look at the element ` +
-    `\`${selector}\`: `;
   inspecting.value = false;
   if (!selectedAgentId.value) {
     await newChat();
     await nextTick();
   }
-  chatRef.value?.appendDraft(text);
+  chatRef.value?.addInspectionDraft(selector);
 }
 
 function startInspect() {

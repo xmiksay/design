@@ -62,6 +62,7 @@ const colorValue = ref("#ff0000");
 const colorDesc = ref("");
 const inspectInput = ref("");
 const inspectDesc = ref("");
+const inspectField = ref(null); // the inspection-string <input>, focused on a pick
 
 const optionCount = computed(
   () => tasks.value.length + colors.value.length + inspections.value.length,
@@ -348,19 +349,22 @@ function stop() {
   sendInterrupt();
 }
 
-// Let the parent (object-inspect mode in the live preview) drop a reference to
-// a picked element into the composer, ready for the user to describe the issue.
-function appendDraft(text) {
-  draft.value = draft.value ? `${draft.value}\n${text}` : text;
+// The parent's object-inspect mode (live preview) hands us a picked element's
+// selector. Surface it as a pending inspection: open the options panel, prefill
+// the inspection-string input, and focus it with the cursor at the end so the
+// user can review/annotate and add it to the message.
+function addInspectionDraft(value) {
+  showOptions.value = true;
+  inspectInput.value = value;
   nextTick(() => {
-    const el = composer.value;
+    const el = inspectField.value;
     if (el) {
       el.focus();
       el.selectionStart = el.selectionEnd = el.value.length;
     }
   });
 }
-defineExpose({ appendDraft });
+defineExpose({ addInspectionDraft });
 
 function answer(entry, allow) {
   const response = allow
@@ -679,6 +683,7 @@ onBeforeUnmount(() => {
             </ul>
             <div class="opt-add">
               <input
+                ref="inspectField"
                 v-model="inspectInput"
                 class="opt-input"
                 type="text"
