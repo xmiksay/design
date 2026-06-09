@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import hljs from "highlight.js";
 import { agentClient } from "./agent.js";
 import { renderMarkdown } from "./markdown.js";
@@ -46,10 +46,89 @@ let unsub = null;
 // real bubble in its place. Cleared on (re)attach (history replay rebuilds all).
 const queued = ref([]);
 
+// ---- Chat options ----
+// Structured extras the user attaches to a message: tasks, colors (hex + note)
+// and inspection strings (e.g. a CSS selector + note). They are appended to the
+// free-text draft as labelled markdown sections on send (see buildMessage), then
+// cleared. Each is a flat list the user builds up with the option panel.
+const tasks = ref([]); // [string]
+const colors = ref([]); // [{ color, desc }]
+const inspections = ref([]); // [{ value, desc }]
+const showOptions = ref(false);
+
+// Pending inputs for the "add" rows in the option panel.
+const taskInput = ref("");
+const colorValue = ref("#ff0000");
+const colorDesc = ref("");
+const inspectInput = ref("");
+const inspectDesc = ref("");
+
+const optionCount = computed(
+  () => tasks.value.length + colors.value.length + inspections.value.length,
+);
+
+// The send buttons activate when there's *anything* to send — free text or any
+// attached option.
+const hasContent = computed(() => !!draft.value.trim() || optionCount.value > 0);
+
+function addTask() {
+  const t = taskInput.value.trim();
+  if (!t) return;
+  tasks.value.push(t);
+  taskInput.value = "";
+}
+function addColor() {
+  const color = colorValue.value.trim();
+  if (!color) return;
+  colors.value.push({ color, desc: colorDesc.value.trim() });
+  colorDesc.value = "";
+}
+function addInspection() {
+  const value = inspectInput.value.trim();
+  if (!value) return;
+  inspections.value.push({ value, desc: inspectDesc.value.trim() });
+  inspectInput.value = "";
+  inspectDesc.value = "";
+}
+
+function clearOptions() {
+  tasks.value = [];
+  colors.value = [];
+  inspections.value = [];
+}
+
+// Compose the outgoing message: the free text first, then one labelled section
+// per non-empty option group, formatted as markdown bullet lists. Empty sections
+// are skipped entirely.
+function buildMessage() {
+  const parts = [];
+  const text = draft.value.trim();
+  if (text) parts.push(text);
+  if (tasks.value.length) {
+    parts.push("tasks:\n" + tasks.value.map((t) => `- ${t}`).join("\n"));
+  }
+  if (colors.value.length) {
+    parts.push(
+      "colors:\n" +
+        colors.value.map((c) => `- \`${c.color}\`${c.desc ? ` ${c.desc}` : ""}`).join("\n"),
+    );
+  }
+  if (inspections.value.length) {
+    parts.push(
+      "inspections:\n" +
+        inspections.value
+          .map((i) => `- \`${i.value}\`${i.desc ? ` ${i.desc}` : ""}`)
+          .join("\n"),
+    );
+  }
+  return parts.join("\n\n");
+}
+
 function reset() {
   entries.value = [];
   busy.value = false;
   queued.value = [];
+  clearOptions();
 }
 
 function scrollDown() {
@@ -234,19 +313,21 @@ function pushUserText(text) {
 }
 
 function sendDraft() {
-  const text = draft.value.trim();
-  if (!text) return;
+  if (!hasContent.value) return;
+  const text = buildMessage();
   postMessage(text);
   draft.value = "";
+  clearOptions();
   busy.value = true;
 }
 
 function steerDraft() {
-  const text = draft.value.trim();
-  if (!text || !busy.value) return;
+  if (!hasContent.value || !busy.value) return;
+  const text = buildMessage();
   sendInterrupt();
   postMessage(text);
   draft.value = "";
+  clearOptions();
   // Still busy: the interrupt's `result` plus the new turn keep the agent working.
   busy.value = true;
 }
@@ -529,6 +610,94 @@ onBeforeUnmount(() => {
     </div>
 
     <form class="composer" @submit.prevent="sendDraft">
+      <div class="options">
+        <button
+          type="button"
+          class="options-toggle"
+          :class="{ open: showOptions }"
+          @click="showOptions = !showOptions"
+        >
+          {{ showOptions ? "▾" : "▸" }} Options
+          <span v-if="optionCount" class="options-count">{{ optionCount }}</span>
+        </button>
+
+        <div v-if="showOptions" class="options-body">
+          <!-- Tasks -->
+          <div class="opt-group">
+            <div class="opt-label">Tasks</div>
+            <ul v-if="tasks.length" class="opt-list">
+              <li v-for="(t, i) in tasks" :key="i" class="opt-item">
+                <span class="opt-text">{{ t }}</span>
+                <button type="button" class="opt-remove" title="Remove" @click="tasks.splice(i, 1)">×</button>
+              </li>
+            </ul>
+            <div class="opt-add">
+              <input
+                v-model="taskInput"
+                class="opt-input"
+                type="text"
+                placeholder="Add a task…"
+                @keydown.enter.prevent="addTask"
+              />
+              <button type="button" class="opt-add-btn" :disabled="!taskInput.trim()" @click="addTask">+</button>
+            </div>
+          </div>
+
+          <!-- Colors -->
+          <div class="opt-group">
+            <div class="opt-label">Colors</div>
+            <ul v-if="colors.length" class="opt-list">
+              <li v-for="(c, i) in colors" :key="i" class="opt-item">
+                <span class="opt-swatch" :style="{ background: c.color }" />
+                <code class="opt-code">{{ c.color }}</code>
+                <span v-if="c.desc" class="opt-text">{{ c.desc }}</span>
+                <button type="button" class="opt-remove" title="Remove" @click="colors.splice(i, 1)">×</button>
+              </li>
+            </ul>
+            <div class="opt-add">
+              <input v-model="colorValue" class="opt-color" type="color" title="Pick a color" />
+              <input
+                v-model="colorDesc"
+                class="opt-input"
+                type="text"
+                placeholder="Description…"
+                @keydown.enter.prevent="addColor"
+              />
+              <button type="button" class="opt-add-btn" @click="addColor">+</button>
+            </div>
+          </div>
+
+          <!-- Inspections -->
+          <div class="opt-group">
+            <div class="opt-label">Inspections</div>
+            <ul v-if="inspections.length" class="opt-list">
+              <li v-for="(s, i) in inspections" :key="i" class="opt-item">
+                <code class="opt-code">{{ s.value }}</code>
+                <span v-if="s.desc" class="opt-text">{{ s.desc }}</span>
+                <button type="button" class="opt-remove" title="Remove" @click="inspections.splice(i, 1)">×</button>
+              </li>
+            </ul>
+            <div class="opt-add">
+              <input
+                v-model="inspectInput"
+                class="opt-input"
+                type="text"
+                placeholder="Inspection string…"
+                @keydown.enter.prevent="addInspection"
+              />
+              <input
+                v-model="inspectDesc"
+                class="opt-input"
+                type="text"
+                placeholder="Description…"
+                @keydown.enter.prevent="addInspection"
+              />
+              <button type="button" class="opt-add-btn" :disabled="!inspectInput.trim()" @click="addInspection">+</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <textarea
         ref="composer"
         v-model="draft"
@@ -543,13 +712,13 @@ onBeforeUnmount(() => {
           v-if="busy"
           class="steer"
           type="button"
-          :disabled="!draft.trim()"
+          :disabled="!hasContent"
           title="Interrupt the current turn and redirect with this message"
           @click="steerDraft"
         >
           Steer ▸
         </button>
-        <button class="send" type="submit" :disabled="!draft.trim()">Send ▸</button>
+        <button class="send" type="submit" :disabled="!hasContent">Send ▸</button>
       </div>
     </form>
   </div>
@@ -979,6 +1148,155 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+}
+
+/* ── Chat options ──────────────────────────────────────────── */
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.options-toggle {
+  align-self: flex-start;
+  background: transparent;
+  border: none;
+  color: var(--tool-muted);
+  font-family: var(--tool-mono);
+  font-size: 0.74rem;
+  cursor: pointer;
+  padding: 0.1rem 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.options-toggle:hover,
+.options-toggle.open {
+  color: var(--tool-text);
+}
+.options-count {
+  background: var(--tool-accent);
+  color: var(--tool-accent-ink);
+  border-radius: 999px;
+  padding: 0 0.4rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+.options-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.55rem;
+  background: var(--tool-bg);
+  border: 1px solid var(--tool-border);
+  border-radius: 8px;
+}
+.opt-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.opt-label {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  color: var(--tool-muted);
+}
+.opt-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.opt-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--tool-panel);
+  border: 1px solid var(--tool-border);
+  border-radius: 6px;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.78rem;
+}
+.opt-swatch {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--tool-border);
+}
+.opt-code {
+  font-family: var(--tool-mono);
+  font-size: 0.74rem;
+  color: var(--tool-text);
+}
+.opt-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--tool-text);
+  word-break: break-word;
+}
+.opt-remove {
+  flex: none;
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--tool-muted);
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0 0.15rem;
+}
+.opt-remove:hover {
+  color: var(--tool-danger);
+}
+.opt-add {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.opt-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--tool-panel);
+  color: var(--tool-text);
+  border: 1px solid var(--tool-border);
+  border-radius: 6px;
+  padding: 0.3rem 0.4rem;
+  font-family: var(--tool-sans);
+  font-size: 0.78rem;
+}
+.opt-input:focus {
+  outline: none;
+  border-color: var(--tool-accent);
+}
+.opt-color {
+  flex: none;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  background: var(--tool-panel);
+  border: 1px solid var(--tool-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.opt-add-btn {
+  flex: none;
+  background: var(--tool-accent);
+  color: var(--tool-accent-ink);
+  border: none;
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.opt-add-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 .composer-input {
   width: 100%;

@@ -12,4 +12,6 @@ To switch the live preview pane to a workspace file, write a marker on its own l
 
 Work in small, reviewable steps. When design tokens exist, treat them as the source of truth and have components consume them instead of hard-coding values. Prefer the simplest change that fits the substrate; do not add build tooling, dependencies, or frameworks unless the repo already uses them or the person asks. Run only builds and commands the repo actually defines.
 
+A message may end with labelled sections the person attached from the chat options panel: a `tasks:` list of things to do, a `colors:` list of `` `#hex` `` values each with a note, and an `inspections:` list of `` `string` `` references (e.g. a CSS selector) each with a note. Treat them as structured input to the request — work the tasks, use the colors as given, and look at the referenced inspections.
+
 Be concise and direct. Say what you changed and why. If the task or the substrate's conventions are ambiguous, ask rather than guess.
