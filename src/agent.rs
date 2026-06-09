@@ -125,10 +125,23 @@ impl AgentSpec {
             args.push(id.to_string());
         }
         Self {
-            program: "claude".into(),
+            program: claude_binary(),
             args,
         }
     }
+}
+
+/// Resolve the Claude Code binary to launch. Honours `DESIGN_CLAUDE_BIN` (a path
+/// or bare command name) when set and non-empty, so users whose `claude` lives
+/// off `PATH` — or under a different name — can point us at it; otherwise we fall
+/// back to `claude` on `PATH`. `.env` values count, since they're loaded into the
+/// process environment at startup.
+fn claude_binary() -> String {
+    std::env::var("DESIGN_CLAUDE_BIN")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "claude".into())
 }
 
 // ---- Claude session discovery (for "resume past chat") -------------------

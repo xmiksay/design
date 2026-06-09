@@ -145,6 +145,16 @@ Override it with repeatable `--allow` rules (passed through to Claude Code's
 design ./my-design-system --allow Read --allow Edit --allow "Bash(npm *)"
 ```
 
+### Claude Code binary
+
+Agents launch the `claude` binary found on your `PATH`. If yours lives elsewhere
+— or under a different name — point the tool at it with `DESIGN_CLAUDE_BIN`
+(a path or bare command name; also honoured from `.env`):
+
+```sh
+DESIGN_CLAUDE_BIN=/opt/claude/bin/claude design ./my-design-system
+```
+
 ## Security model
 
 The server is the only new attack surface, so it ships locked down from day one:
