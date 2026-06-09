@@ -62,7 +62,11 @@ const colorValue = ref("#ff0000");
 const colorDesc = ref("");
 const inspectInput = ref("");
 const inspectDesc = ref("");
-const inspectField = ref(null); // the inspection-string <input>, focused on a pick
+const inspectDescField = ref(null); // the description <input>, focused on a pick
+// A selector captured from the live-preview object-inspect tool, awaiting a
+// description. Held aside (never shown in the string input) — the user already
+// saw it as a hover label while picking; here they only annotate it.
+const pendingInspection = ref("");
 
 const optionCount = computed(
   () => tasks.value.length + colors.value.length + inspections.value.length,
@@ -85,17 +89,21 @@ function addColor() {
   colorDesc.value = "";
 }
 function addInspection() {
-  const value = inspectInput.value.trim();
+  // A pending pick (the captured selector) is the value when present; otherwise
+  // the manually typed string is.
+  const value = (inspectInput.value.trim() || pendingInspection.value).trim();
   if (!value) return;
   inspections.value.push({ value, desc: inspectDesc.value.trim() });
   inspectInput.value = "";
   inspectDesc.value = "";
+  pendingInspection.value = "";
 }
 
 function clearOptions() {
   tasks.value = [];
   colors.value = [];
   inspections.value = [];
+  pendingInspection.value = "";
 }
 
 // Compose the outgoing message: the free text first, then one labelled section
@@ -355,14 +363,9 @@ function stop() {
 // user can review/annotate and add it to the message.
 function addInspectionDraft(value) {
   showOptions.value = true;
-  inspectInput.value = value;
-  nextTick(() => {
-    const el = inspectField.value;
-    if (el) {
-      el.focus();
-      el.selectionStart = el.selectionEnd = el.value.length;
-    }
-  });
+  pendingInspection.value = value; // captured, not shown in the string input
+  inspectInput.value = "";
+  nextTick(() => inspectDescField.value?.focus());
 }
 defineExpose({ addInspectionDraft });
 
@@ -682,8 +685,9 @@ onBeforeUnmount(() => {
               </li>
             </ul>
             <div class="opt-add">
+              <span v-if="pendingInspection" class="opt-pending" title="Element captured from the live preview">◎ element</span>
               <input
-                ref="inspectField"
+                v-else
                 v-model="inspectInput"
                 class="opt-input"
                 type="text"
@@ -691,13 +695,21 @@ onBeforeUnmount(() => {
                 @keydown.enter.prevent="addInspection"
               />
               <input
+                ref="inspectDescField"
                 v-model="inspectDesc"
                 class="opt-input"
                 type="text"
-                placeholder="Description…"
+                :placeholder="pendingInspection ? 'Describe the element…' : 'Description…'"
                 @keydown.enter.prevent="addInspection"
               />
-              <button type="button" class="opt-add-btn" :disabled="!inspectInput.trim()" @click="addInspection">+</button>
+              <button
+                type="button"
+                class="opt-add-btn"
+                :disabled="!inspectInput.trim() && !pendingInspection"
+                @click="addInspection"
+              >
+                +
+              </button>
             </div>
           </div>
         </div>
@@ -1276,6 +1288,20 @@ onBeforeUnmount(() => {
 .opt-input:focus {
   outline: none;
   border-color: var(--tool-accent);
+}
+.opt-pending {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: color-mix(in srgb, var(--tool-accent) 16%, var(--tool-bg));
+  border: 1px solid var(--tool-accent);
+  color: var(--tool-accent);
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 .opt-color {
   flex: none;

@@ -84,6 +84,7 @@ const chatRef = ref(null);
 const inspecting = ref(false);
 let inspectCleanup = null;
 let highlightEl = null;
+let labelEl = null;
 
 function getFrame() {
   return deviceRef.value?.getFrame?.() ?? null;
@@ -110,7 +111,26 @@ function moveHighlight(el) {
       "border-radius:2px",
       "transition:all 40ms ease",
     ].join(";");
+    // A label that shows the element's selector under the cursor, so the user
+    // sees what they're about to pick. The selector lives here on hover — it is
+    // never surfaced in the chat options panel.
+    labelEl = doc.createElement("div");
+    labelEl.style.cssText = [
+      "position:fixed",
+      "pointer-events:none",
+      "z-index:2147483647",
+      "background:#4aa3ff",
+      "color:#fff",
+      "font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace",
+      "padding:1px 6px",
+      "border-radius:3px",
+      "max-width:80vw",
+      "overflow:hidden",
+      "text-overflow:ellipsis",
+      "white-space:nowrap",
+    ].join(";");
     doc.body.appendChild(highlightEl);
+    doc.body.appendChild(labelEl);
   }
   const r = el.getBoundingClientRect();
   Object.assign(highlightEl.style, {
@@ -120,6 +140,10 @@ function moveHighlight(el) {
     width: `${r.width}px`,
     height: `${r.height}px`,
   });
+  // Sit the label just above the box, dropping inside it when there's no room.
+  labelEl.textContent = computeSelector(el);
+  const labelTop = r.top >= 20 ? r.top - 19 : r.top + 2;
+  Object.assign(labelEl.style, { display: "block", left: `${r.left}px`, top: `${labelTop}px` });
 }
 
 // The real clicked node. With open shadow roots, `event.target` is retargeted to
@@ -127,7 +151,7 @@ function moveHighlight(el) {
 function eventTarget(e) {
   const path = typeof e.composedPath === "function" ? e.composedPath() : null;
   const el = path && path.length ? path[0] : e.target;
-  return el && el.nodeType === 1 && el !== highlightEl ? el : null;
+  return el && el.nodeType === 1 && el !== highlightEl && el !== labelEl ? el : null;
 }
 
 function onInspectMove(e) {
@@ -176,6 +200,10 @@ function startInspect() {
     if (highlightEl) {
       highlightEl.remove();
       highlightEl = null;
+    }
+    if (labelEl) {
+      labelEl.remove();
+      labelEl = null;
     }
   };
 }
