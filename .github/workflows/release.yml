@@ -1,12 +1,12 @@
 name: release
 
-# Cut a release when a version tag is pushed. The tag is the version and must
-# match YYYY.mm.dd[.a-z] (e.g. 2026.06.10 or 2026.06.10.b); see src/version.rs.
+# Cut a release when a version tag is pushed. The tag is the version and must be
+# a semver-compatible date: YYYY.M.D[-a-z] (e.g. 2026.6.10 or 2026.6.10-b); see
+# src/version.rs. The glob is broad; the test job validates the exact format.
 on:
   push:
     tags:
-      - "[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]"
-      - "[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9].[a-z]"
+      - "[0-9]*.[0-9]*.[0-9]*"
 
 permissions:
   contents: write
@@ -24,8 +24,8 @@ jobs:
 
       - name: Validate version tag format
         run: |
-          if ! [[ "$DESIGN_VERSION" =~ ^[0-9]{4}\.(0[1-9]|1[0-2])\.(0[1-9]|[12][0-9]|3[01])(\.[a-z])?$ ]]; then
-            echo "::error::Tag '$DESIGN_VERSION' is not a valid YYYY.mm.dd[.a-z] version"
+          if ! [[ "$DESIGN_VERSION" =~ ^[0-9]{4}\.([1-9]|1[0-2])\.([1-9]|[12][0-9]|3[01])(-[a-z])?$ ]]; then
+            echo "::error::Tag '$DESIGN_VERSION' is not a valid semver date version YYYY.M.D[-a-z]"
             exit 1
           fi
 
