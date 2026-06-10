@@ -186,8 +186,8 @@ design ./my-design-system --public -p 4321
 
 Pushing a version tag triggers the `release` workflow
 ([`.github/workflows/release.yml`](.github/workflows/release.yml)): it runs the
-tests, then cross-builds native binaries for Linux, macOS (Intel + Apple
-Silicon), and Windows and attaches them to a GitHub Release for the tag.
+tests, then cross-builds native binaries for Linux, macOS (Apple Silicon),
+and Windows and attaches them to a GitHub Release for the tag.
 
 Tags — and the version baked into the binary — use a **semver-compatible**
 date scheme, **`YYYY.M.D`** (year/month/day with no leading zeros, since semver
