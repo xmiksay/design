@@ -9,7 +9,7 @@ use anyhow::Context;
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(name = "design", version, about = "Drive a code agent against an agent-neutral design-system repo")]
+#[command(name = "design", version = design::version::LONG_VERSION, about = "Drive a code agent against an agent-neutral design-system repo")]
 struct Cli {
     /// Path to the design-system workspace to serve.
     #[arg(default_value = ".", env = "DESIGN_PATH")]
