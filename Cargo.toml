@@ -1,6 +1,6 @@
 [package]
 name = "design"
-version = "0.1.0"
+version = "2026.6.10"
 edition = "2021"
 description = "Locally-run CLI that drives a code agent against a git-controlled, agent-neutral design-system repo"
 license = "MIT"

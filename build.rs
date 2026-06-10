@@ -1,8 +1,8 @@
 //! Build script: bake release metadata into the binary as `rustc-env` values
 //! that `src/version.rs` reads back with `env!`.
 //!
-//! - `DESIGN_VERSION` — the release version (`YYYY.mm.dd[.a-z]`). CI sets this
-//!   from the pushed git tag; local dev builds fall back to the crate version.
+//! - `DESIGN_VERSION` — the release version (`YYYY.M.D[-a-z]`, semver). CI sets
+//!   this from the pushed git tag; local dev builds fall back to the crate version.
 //! - `DESIGN_COMMIT` — short git commit the binary was built from.
 //! - `DESIGN_BUILD_TIMESTAMP` — UTC build time (RFC 3339), honoring
 //!   `SOURCE_DATE_EPOCH` for reproducible builds when set.
@@ -18,8 +18,8 @@ fn main() {
     println!("cargo:rerun-if-changed=.git/HEAD");
 
     // Version baked into the binary. CI exports DESIGN_VERSION from the release
-    // tag (`YYYY.mm.dd[.a-z]`); otherwise fall back to the crate version so dev
-    // builds still report something sensible.
+    // tag (`YYYY.M.D[-a-z]`, semver); otherwise fall back to the crate version so
+    // dev builds still report something sensible.
     let version = env("DESIGN_VERSION")
         .filter(|v| !v.is_empty())
         .or_else(|| env("CARGO_PKG_VERSION"))
