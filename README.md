@@ -182,6 +182,29 @@ agent.
 design ./my-design-system --public -p 4321
 ```
 
+## Releases
+
+Pushing a version tag triggers the `release` workflow
+([`.github/workflows/release.yml`](.github/workflows/release.yml)): it runs the
+tests, then cross-builds native binaries for Linux, macOS (Intel + Apple
+Silicon), and Windows and attaches them to a GitHub Release for the tag.
+
+Tags — and the version baked into the binary — use a **`YYYY.mm.dd[.a-z]`**
+date scheme (zero-padded month/day, optional `.a`–`.z` suffix to disambiguate
+multiple releases on the same day), e.g. `2026.06.10` or `2026.06.10.b`. The
+format is enforced by the workflow and unit-tested in `src/version.rs`.
+
+```sh
+git tag 2026.06.10 && git push origin 2026.06.10
+```
+
+Each build stamps the version, git commit, and UTC build time into the binary
+(via `build.rs`), surfaced through `design --version`:
+
+```text
+design 2026.06.10 (a1b2c3d, built 2026-06-10T12:34:56Z)
+```
+
 ## License
 
 MIT.
