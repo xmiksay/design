@@ -114,11 +114,16 @@ function makeClient() {
 
   // ---- public API ----
 
-  function spawn(agentType = "claude-code", resume = null) {
+  // Spawn an agent. `opts` carries spawn-time model knobs — `{ model, effort,
+  // thinking }` — each optional; omit a field to inherit Claude's global setting.
+  function spawn(agentType = "claude-code", resume = null, opts = {}) {
     return new Promise((resolve) => {
       spawnWaiters.push(resolve);
       const msg = { op: "spawn", agentType };
       if (resume) msg.resume = resume;
+      if (opts.model) msg.model = opts.model;
+      if (opts.effort) msg.effort = opts.effort;
+      if (opts.thinking != null && opts.thinking !== "") msg.thinking = Number(opts.thinking);
       send(msg);
     });
   }

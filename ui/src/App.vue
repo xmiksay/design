@@ -340,8 +340,42 @@ const connected = computed(() => agentClient.state.connected);
 const selectedAgentId = ref(null);
 const newAgentType = ref("claude-code");
 
+// Spawn-time model knobs, applied to both "+ New" and "Resume". Empty string =
+// "Default" = omit the flag and inherit Claude Code's global settings.
+const newModel = ref("");
+const newEffort = ref("");
+const newThinking = ref("");
+const MODELS = [
+  { value: "", label: "Model: default" },
+  { value: "opus", label: "Opus" },
+  { value: "sonnet", label: "Sonnet" },
+  { value: "haiku", label: "Haiku" },
+  { value: "fable", label: "Fable" },
+  { value: "opusplan", label: "Opus Plan" },
+  { value: "opus[1m]", label: "Opus · 1M" },
+  { value: "sonnet[1m]", label: "Sonnet · 1M" },
+];
+const EFFORTS = [
+  { value: "", label: "Effort: default" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "xhigh", label: "Extra high" },
+  { value: "max", label: "Max" },
+];
+const THINKINGS = [
+  { value: "", label: "Thinking: default" },
+  { value: "0", label: "Off" },
+  { value: "4000", label: "Think" },
+  { value: "10000", label: "Think hard" },
+  { value: "31999", label: "Ultrathink" },
+];
+function spawnOpts() {
+  return { model: newModel.value, effort: newEffort.value, thinking: newThinking.value };
+}
+
 async function newChat() {
-  const id = await agentClient.spawn(newAgentType.value);
+  const id = await agentClient.spawn(newAgentType.value, null, spawnOpts());
   if (id) selectedAgentId.value = id;
 }
 
@@ -361,7 +395,7 @@ async function toggleResume() {
 
 async function resumeChat(id) {
   showResume.value = false;
-  const newId = await agentClient.spawn("claude-code", id);
+  const newId = await agentClient.spawn("claude-code", id, spawnOpts());
   if (newId) selectedAgentId.value = newId;
 }
 
@@ -550,6 +584,15 @@ onMounted(() => {
         <div class="chat-controls">
           <select v-model="newAgentType" class="agent-select">
             <option value="claude-code">Claude Code</option>
+          </select>
+          <select v-model="newModel" class="agent-select" title="Model (spawn-time)">
+            <option v-for="m in MODELS" :key="m.value" :value="m.value">{{ m.label }}</option>
+          </select>
+          <select v-model="newEffort" class="agent-select" title="Reasoning effort (spawn-time)">
+            <option v-for="e in EFFORTS" :key="e.value" :value="e.value">{{ e.label }}</option>
+          </select>
+          <select v-model="newThinking" class="agent-select" title="Thinking budget (spawn-time)">
+            <option v-for="t in THINKINGS" :key="t.value" :value="t.value">{{ t.label }}</option>
           </select>
           <button class="new-chat-btn" :disabled="!connected" @click="newChat">+ New</button>
           <div class="resume-wrap">
