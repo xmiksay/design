@@ -54,7 +54,7 @@ const queued = ref([]);
 const tasks = ref([]); // [string]
 const colors = ref([]); // [{ color, desc }]
 const inspections = ref([]); // [{ value, desc }]
-const images = ref([]); // [{ name, mediaType, dataB64 }] — sent as image content blocks
+const images = ref([]); // [{ name, path, previewUrl }] — uploaded; referenced by path
 const showOptions = ref(false);
 const imageInput = ref(null);
 
@@ -79,27 +79,37 @@ const optionCount = computed(
 // attached option/image.
 const hasContent = computed(() => !!draft.value.trim() || optionCount.value > 0);
 
-// Read an image File into a raw base64 string (+ media type) for an image content
-// block. The data URL prefix (`data:<mime>;base64,`) is stripped — Claude Code's
-// stream-json input wants the bare base64 payload.
-function addImage(file) {
+// Upload an image File to the backend, which saves it inside the workspace and
+// returns its workspace-relative path. We reference that path in the message (see
+// buildMessage) so the agent reads the image via its Read tool — no base64 inlined
+// into the conversation. The thumbnail uses a local object URL for this session.
+async function addImage(file) {
   if (!file || !file.type.startsWith("image/")) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    const url = String(reader.result);
-    const comma = url.indexOf(",");
-    if (comma < 0) return;
-    images.value.push({
-      name: file.name || "pasted-image",
-      mediaType: file.type,
-      dataB64: url.slice(comma + 1),
+  const previewUrl = URL.createObjectURL(file);
+  try {
+    const res = await fetch(`/api/upload?name=${encodeURIComponent(file.name || "image.png")}`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": file.type },
+      body: file,
     });
-  };
-  reader.readAsDataURL(file);
+    if (!res.ok) throw new Error(`upload failed: ${res.status}`);
+    const { path } = await res.json();
+    images.value.push({ name: file.name || "image", path, previewUrl });
+  } catch (err) {
+    URL.revokeObjectURL(previewUrl);
+    push({ kind: "stderr", text: `image upload failed: ${err.message ?? err}` });
+  }
 }
 function onPickImages(e) {
   for (const f of e.target.files ?? []) addImage(f);
   e.target.value = ""; // let the same file be picked again
+}
+// Remove an attached image before sending (frees its preview URL). Images already
+// sent keep their own copy in the message bubble, so this only touches the draft.
+function removeImage(i) {
+  const [img] = images.value.splice(i, 1);
+  if (img) URL.revokeObjectURL(img.previewUrl);
 }
 // Pasting an image anywhere in the composer adds it just like the file picker.
 function onPaste(e) {
@@ -172,6 +182,11 @@ function buildMessage() {
         inspections.value
           .map((i) => `- \`${i.value}\`${i.desc ? ` ${i.desc}` : ""}`)
           .join("\n"),
+    );
+  }
+  if (images.value.length) {
+    parts.push(
+      "images:\n" + images.value.map((im) => `- \`${im.path}\``).join("\n"),
     );
   }
   return parts.join("\n\n");
@@ -269,10 +284,6 @@ function parseStreamJson(msg) {
         break;
       }
       if (Array.isArray(blocks)) {
-        // A user message is either tool_results or a real user turn (text +
-        // images). Collect the latter so the turn renders as one bubble.
-        const texts = [];
-        const imgs = [];
         for (const b of blocks) {
           if (b.type === "tool_result") {
             // A tool_result for an outstanding question/permission means it was
@@ -296,12 +307,9 @@ function parseStreamJson(msg) {
               open: false,
             });
           } else if (b.type === "text" && b.text) {
-            texts.push(b.text);
-          } else if (b.type === "image" && b.source?.type === "base64") {
-            imgs.push({ mediaType: b.source.media_type, dataB64: b.source.data });
+            pushUserText(b.text);
           }
         }
-        if (texts.length || imgs.length) pushUserText(texts.join("\n"), imgs);
       }
       break;
     }
@@ -380,29 +388,23 @@ function contentToText(content) {
 //    kept), THEN send the user message so it redirects the CURRENT flow.
 // Send a user message and show it immediately as a queued bubble. It promotes to
 // a real bubble once the agent echoes the turn back (see pushUserText).
+// The message text already carries the uploaded image paths (buildMessage), so we
+// send plain text; `imgs` rides along only to show thumbnails in the bubble.
 function postMessage(text, imgs = []) {
-  const content = [];
-  if (text) content.push({ type: "text", text });
-  for (const img of imgs) {
-    content.push({
-      type: "image",
-      source: { type: "base64", media_type: img.mediaType, data: img.dataB64 },
-    });
-  }
   agentClient.input(props.agentId, {
     type: "user",
-    message: { role: "user", content },
+    message: { role: "user", content: [{ type: "text", text }] },
   });
-  queued.value.push({ text, images: imgs.slice() });
+  queued.value.push({ text, images: imgs });
   scrollDown();
 }
 
 // The agent echoed a user turn back — it has picked the message up. Drop the
-// oldest queued bubble (FIFO) and render this one for real, preferring the
-// locally-captured images (full fidelity) over any echoed back in the turn.
-function pushUserText(text, imgs = []) {
+// oldest queued bubble (FIFO) and render this one for real, carrying its locally
+// attached image thumbnails.
+function pushUserText(text) {
   const q = queued.value.length ? queued.value.shift() : null;
-  push({ kind: "user", text, images: q?.images?.length ? q.images : imgs });
+  push({ kind: "user", text, images: q?.images ?? [] });
 }
 
 function sendDraft() {
@@ -651,7 +653,7 @@ onBeforeUnmount(() => {
               v-for="(img, ii) in e.images"
               :key="ii"
               class="bubble-image"
-              :src="`data:${img.mediaType};base64,${img.dataB64}`"
+              :src="img.previewUrl"
               :alt="img.name || 'image'"
             />
           </div>
@@ -786,7 +788,7 @@ onBeforeUnmount(() => {
             v-for="(img, ii) in q.images"
             :key="ii"
             class="bubble-image"
-            :src="`data:${img.mediaType};base64,${img.dataB64}`"
+            :src="img.previewUrl"
             :alt="img.name || 'image'"
           />
         </div>
@@ -897,9 +899,9 @@ onBeforeUnmount(() => {
           <div class="opt-group">
             <div class="opt-label">Images</div>
             <ul v-if="images.length" class="opt-thumbs">
-              <li v-for="(img, i) in images" :key="i" class="opt-thumb">
-                <img :src="`data:${img.mediaType};base64,${img.dataB64}`" :alt="img.name" />
-                <button type="button" class="opt-thumb-remove" title="Remove" @click="images.splice(i, 1)">×</button>
+              <li v-for="(img, i) in images" :key="i" class="opt-thumb" :title="img.path">
+                <img :src="img.previewUrl" :alt="img.name" />
+                <button type="button" class="opt-thumb-remove" title="Remove" @click="removeImage(i)">×</button>
               </li>
             </ul>
             <div class="opt-add">
