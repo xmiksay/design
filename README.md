@@ -145,6 +145,18 @@ Override it with repeatable `--allow` rules (passed through to Claude Code's
 design ./my-design-system --allow Read --allow Edit --allow "Bash(npm *)"
 ```
 
+### Model, effort & thinking
+
+The chat header has three spawn-time dropdowns — **Model**, **Effort**, and
+**Thinking** — applied to both **+ New** and **Resume**. They map onto the
+Claude Code CLI: model → `--model` (aliases `opus`/`sonnet`/`haiku`/`fable`/
+`opusplan`, with a `[1m]` 1M-context variant), effort → `--effort`
+(`low`/`medium`/`high`/`xhigh`/`max`), and thinking → the `MAX_THINKING_TOKENS`
+env var (`0` disables extended thinking). Each defaults to **Default**, which
+omits the flag so the agent inherits your global Claude settings. Everything is
+fixed at spawn — the backend is a pure byte relay and cannot reconfigure a
+running agent, so change a knob and start a new chat to apply it.
+
 ### Claude Code binary
 
 Agents launch the `claude` binary found on your `PATH`. If yours lives elsewhere

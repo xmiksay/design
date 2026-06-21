@@ -96,6 +96,13 @@ make tokens              # (sample) regenerate example/src/tokens.css
 - Agents spawn with `--permission-prompt-tool stdio --permission-mode default
   --allowedTools <rules>`; the pre-approved set is the `--allow` CLI flag (repeatable),
   defaulting to read/edit/`Bash(npm run *)`/git-status. Anything else prompts.
+- **Spawn-time model knobs** (chat-header dropdowns, applied to + New *and*
+  Resume): model → `--model`, effort → `--effort`, thinking → the
+  `MAX_THINKING_TOKENS` env var. Carried in a `SpawnConfig` and validated at the
+  WS `spawn` boundary (effort enum; model rejected if it starts with `-`/has
+  whitespace; thinking parsed as `u32`) — invalid falls back to default, never
+  fails the spawn. All fixed at spawn (pure byte relay can't reconfigure a live
+  agent); "Default" omits the flag so the global Claude settings apply.
 - **Console** (`src/console.rs` + `ui/src/Console.vue`): runs `bash -lc <command>`
   in the workspace and streams output over the same `/ws` (`console.run/kill`,
   `console.output/exit`). Tied to the socket — a reload kills the running command.

@@ -63,10 +63,26 @@ impl AgentType {
     }
 }
 
-/// How to launch an agent: just a program + args. The backend shuttles bytes.
+/// Spawn-time model knobs, all optional — a `None` means "omit the flag and
+/// inherit Claude Code's global setting". Set once at spawn because the backend
+/// is a pure byte relay and cannot reconfigure a running process.
+#[derive(Clone, Default)]
+pub struct SpawnConfig {
+    /// `--model` value (alias like `opus`/`sonnet`, optionally `[1m]`-suffixed).
+    pub model: Option<String>,
+    /// `--effort` value (validated to the CLI's enum at the WS boundary).
+    pub effort: Option<String>,
+    /// `MAX_THINKING_TOKENS` env value (`0` disables extended thinking).
+    pub thinking: Option<u32>,
+}
+
+/// How to launch an agent: a program, its args, and any extra environment. The
+/// backend shuttles bytes; the env carries spawn-time knobs the CLI reads from
+/// the process environment (e.g. `MAX_THINKING_TOKENS`).
 struct AgentSpec {
     program: String,
     args: Vec<String>,
+    envs: Vec<(String, String)>,
 }
 
 impl AgentSpec {
@@ -75,9 +91,10 @@ impl AgentSpec {
         allowed: &[String],
         resume: Option<&str>,
         extra_prompt: Option<&str>,
+        config: &SpawnConfig,
     ) -> Self {
         match t {
-            AgentType::ClaudeCode => Self::claude(allowed, resume, extra_prompt),
+            AgentType::ClaudeCode => Self::claude(allowed, resume, extra_prompt, config),
         }
     }
 
@@ -87,7 +104,12 @@ impl AgentSpec {
     /// `--allowedTools` pre-approves the user's rule set so prompts stay rare.
     /// When `resume` is set, `--resume <id>` reattaches to a prior session for this
     /// workspace (the transcript is seeded separately, see [`seed_history`]).
-    fn claude(allowed: &[String], resume: Option<&str>, extra_prompt: Option<&str>) -> Self {
+    fn claude(
+        allowed: &[String],
+        resume: Option<&str>,
+        extra_prompt: Option<&str>,
+        config: &SpawnConfig,
+    ) -> Self {
         // Our built-in role, plus the user's launch-time extension (`--prompt`/
         // `--prompt-file`) when given — the whole thing is appended to Claude
         // Code's default system prompt.
@@ -124,9 +146,26 @@ impl AgentSpec {
             args.push("--resume".into());
             args.push(id.to_string());
         }
+        // Spawn-time model knobs. Each is omitted when `None`, so the agent
+        // inherits the user's global Claude Code settings.
+        if let Some(model) = config.model.as_deref().filter(|s| !s.is_empty()) {
+            args.push("--model".into());
+            args.push(model.to_string());
+        }
+        if let Some(effort) = config.effort.as_deref().filter(|s| !s.is_empty()) {
+            args.push("--effort".into());
+            args.push(effort.to_string());
+        }
+        // `MAX_THINKING_TOKENS` is read from the environment, not a flag; `0`
+        // disables extended thinking entirely.
+        let envs = config
+            .thinking
+            .map(|t| vec![("MAX_THINKING_TOKENS".into(), t.to_string())])
+            .unwrap_or_default();
         Self {
             program: claude_binary(),
             args,
+            envs,
         }
     }
 }
@@ -385,16 +424,23 @@ impl AgentManager {
     /// Spawn a new agent process in the workspace and wire up its I/O pumps.
     /// When `resume` is set, reattach to that prior Claude session and seed the
     /// replay history from its transcript so the chat repaints.
-    fn spawn(&self, agent_type: AgentType, resume: Option<&str>) -> anyhow::Result<Uuid> {
+    fn spawn(
+        &self,
+        agent_type: AgentType,
+        resume: Option<&str>,
+        config: &SpawnConfig,
+    ) -> anyhow::Result<Uuid> {
         let spec = AgentSpec::for_type(
             agent_type,
             &self.allowed,
             resume,
             self.extra_prompt.as_deref().map(String::as_str),
+            config,
         );
 
         let mut cmd = Command::new(&spec.program);
         cmd.args(&spec.args)
+            .envs(spec.envs.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .current_dir(self.workspace.as_path())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -664,8 +710,9 @@ async fn handle_client_frame(
                 .and_then(Value::as_str)
                 .unwrap_or("claude-code");
             let resume = frame.get("resume").and_then(Value::as_str);
+            let config = spawn_config_from_frame(&frame);
             match AgentType::from_wire(kind) {
-                Some(t) => match manager.spawn(t, resume) {
+                Some(t) => match manager.spawn(t, resume, &config) {
                     Ok(id) => {
                         let _ = tx.send(simple_message("spawned", id)).await;
                     }
@@ -774,4 +821,38 @@ fn frame_id(frame: &Value) -> Option<Uuid> {
         .get("id")
         .and_then(Value::as_str)
         .and_then(|s| Uuid::parse_str(s).ok())
+}
+
+/// Allowed `--effort` values, mirroring the Claude Code CLI's enum.
+const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+
+/// Extract the spawn-time model knobs from a `spawn` frame, validating each
+/// independently. Anything invalid is dropped to `None` (the flag is omitted, so
+/// the agent inherits global settings) — a bad knob never fails the spawn.
+fn spawn_config_from_frame(frame: &Value) -> SpawnConfig {
+    // A model alias/name: reject anything that could be read as a flag (leading
+    // `-`) or that contains whitespace; pass the rest through to `--model`.
+    let model = frame
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && !s.starts_with('-') && !s.chars().any(char::is_whitespace))
+        .map(str::to_string);
+    let effort = frame
+        .get("effort")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| EFFORTS.contains(s))
+        .map(str::to_string);
+    // Thinking budget: accept a JSON number or a numeric string, as a `u32`.
+    let thinking = frame.get("thinking").and_then(|v| {
+        v.as_u64()
+            .or_else(|| v.as_str().and_then(|s| s.trim().parse::<u64>().ok()))
+            .and_then(|n| u32::try_from(n).ok())
+    });
+    SpawnConfig {
+        model,
+        effort,
+        thinking,
+    }
 }
