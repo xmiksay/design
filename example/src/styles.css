@@ -4,10 +4,72 @@
 
 body {
   margin: 0;
-  background: var(--color-bg);
   color: var(--color-ink);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
+
+  /* Background image, all from tokens: a faint chessboard, masked so it fades
+     toward the edges. The "pixel explosion" overlay lives on body::before. */
+  background-color: var(--color-bg);
+  background-image:
+    repeating-conic-gradient(
+      var(--color-surface) 0deg 90deg,
+      transparent 90deg 180deg
+    );
+  background-size: 48px 48px;
+  background-position: center top;
+  background-attachment: fixed;
+}
+
+/* Pixel explosion — a burst of crisp pixel squares scattered from the top,
+   drawn entirely with box-shadow (one anchored pixel cloned into many). Sits
+   behind the page content and is non-interactive. */
+body::before {
+  content: "";
+  position: fixed;
+  top: 8vh;
+  left: 50%;
+  width: 7px;
+  height: 7px;
+  background: var(--color-accent);
+  z-index: -1;
+  pointer-events: none;
+  box-shadow:
+    /* dense core */
+       18px   12px 0 1px var(--color-accent),
+      -26px   20px 0 0   var(--color-ink),
+       40px   34px 0 -1px var(--color-accent),
+      -52px   30px 0 1px  var(--color-line),
+       64px    8px 0 0    var(--color-muted),
+      -78px   46px 0 -2px var(--color-accent),
+       92px   58px 0 0    var(--color-line),
+     -104px   18px 0 -1px var(--color-ink),
+      120px   72px 0 1px  var(--color-accent),
+     -132px   64px 0 -2px var(--color-muted),
+    /* mid ring */
+      150px  110px 0 0    var(--color-line),
+     -168px   96px 0 -1px var(--color-accent),
+      186px   42px 0 -2px var(--color-ink),
+     -204px  132px 0 0    var(--color-muted),
+      222px  158px 0 -1px var(--color-accent),
+     -240px   88px 0 -2px var(--color-line),
+      258px  204px 0 0    var(--color-accent),
+     -276px  176px 0 -2px var(--color-ink),
+      294px  120px 0 -2px var(--color-muted),
+     -312px  238px 0 -1px var(--color-line),
+    /* outer scatter */
+      336px  286px 0 -2px var(--color-accent),
+     -360px  210px 0 -2px var(--color-line),
+      384px  340px 0 -3px var(--color-muted),
+     -408px  308px 0 -2px var(--color-accent),
+      432px  168px 0 -3px var(--color-ink),
+     -456px  392px 0 -2px var(--color-line),
+      480px  430px 0 -3px var(--color-accent),
+     -504px  356px 0 -3px var(--color-muted),
+      528px  264px 0 -3px var(--color-line),
+     -552px  468px 0 -3px var(--color-accent),
+      576px  510px 0 -4px var(--color-ink),
+     -600px  420px 0 -3px var(--color-line);
 }
 
 .page {

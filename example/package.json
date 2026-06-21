@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Agent-neutral design system — native Web Components, themed by DTCG tokens. No build step; node is used only to compile tokens.",
   "scripts": {
+    "build": "node build.mjs",
     "tokens": "node build.mjs"
   }
 }
