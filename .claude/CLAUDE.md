@@ -35,7 +35,9 @@ make tokens              # (sample) regenerate example/src/tokens.css
   `src/bin/design.rs`. No sub-crates; modules only.
   - `server.rs` — Axum: loopback bind, per-launch token (query → `Strict`
     cookie), Host/Origin checks, `/api/tree`, `/api/file` (traversal-safe),
-    `/raw/*` (workspace files for the iframe), and the embedded SPA fallback.
+    `/api/upload` (chat image → `.design/uploads/`, returns a workspace-relative
+    path the agent reads), `/raw/*` (workspace files for the iframe), and the
+    embedded SPA fallback.
   - `embed.rs` — rust-embed of `ui/dist`.
 - **`ui/` (the driver SPA)** — Vue 3 + Vite. Disposable tool UI (Vue is fine
   here; do not confuse it with the substrate). Right pane is three tabbed
@@ -93,6 +95,12 @@ make tokens              # (sample) regenerate example/src/tokens.css
   assistant text, strips it, and emits `preview` up to `App.vue` (`showPreview`).
   No MCP server, no backend round-trip — keep it that way (the marker syntax is
   defined in `src/prompts/design_system_prompt.md`).
+- **Image upload is a path reference, not base64.** The Options panel uploads a
+  picked/pasted image via `POST /api/upload`; the backend saves it under
+  `.design/uploads/` in the workspace and returns the relative path, which
+  `Chat.vue` appends to the message as an `images:` section. The agent reads the
+  file with its (pre-approved) Read tool — nothing base64 is inlined into the
+  stream-json conversation. Keep it that way.
 - Agents spawn with `--permission-prompt-tool stdio --permission-mode default
   --allowedTools <rules>`; the pre-approved set is the `--allow` CLI flag (repeatable),
   defaulting to read/edit/`Bash(npm run *)`/git-status. Anything else prompts.

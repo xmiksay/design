@@ -14,12 +14,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context;
-use axum::body::Body;
-use axum::extract::{Query, State, WebSocketUpgrade};
+use axum::body::{Body, Bytes};
+use axum::extract::{DefaultBodyLimit, Query, State, WebSocketUpgrade};
 use axum::http::{header, HeaderValue, Request, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tower_http::services::ServeDir;
@@ -35,6 +35,14 @@ const IGNORED_DIRS: &[&str] = &[".git", "node_modules", "target", ".DS_Store"];
 
 /// Max bytes returned by the file-read endpoint.
 const MAX_FILE_BYTES: usize = 512 * 1024;
+
+/// Max bytes accepted for a single chat image upload.
+const MAX_UPLOAD_BYTES: usize = 16 * 1024 * 1024;
+
+/// Workspace-relative directory where chat image uploads land. Dotted so it stays
+/// out of the file browser and the user's own structure; the agent (cwd = the
+/// workspace) reads the returned path via its Read tool.
+const UPLOAD_DIR: &str = ".design/uploads";
 
 /// Shared, cheaply-cloneable request context.
 #[derive(Clone)]
@@ -114,6 +122,12 @@ pub async fn serve(
     let app = Router::new()
         .route("/api/tree", get(tree_handler))
         .route("/api/file", get(file_handler))
+        // Chat image upload: raw bytes in, workspace-relative path out. Its body
+        // limit is raised well above the global default for image-sized payloads.
+        .route(
+            "/api/upload",
+            post(upload_handler).layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES)),
+        )
         .route("/api/agents", get(agents_handler))
         .route("/api/sessions", get(sessions_handler))
         // Multiplexed agent channel. Behind the security layer (below), so the
@@ -389,6 +403,67 @@ async fn file_handler(Query(q): Query<FileQuery>, State(state): State<AppState>)
         truncated,
     })
     .into_response()
+}
+
+// ---- Image upload --------------------------------------------------------
+
+#[derive(Deserialize)]
+struct UploadQuery {
+    /// Client-suggested filename; sanitized server-side (never trusted as a path).
+    name: Option<String>,
+}
+
+#[derive(Serialize)]
+struct UploadResult {
+    /// Workspace-relative path the SPA references in the message for the agent.
+    path: String,
+}
+
+/// POST `/api/upload?name=foo.png` — save raw image bytes into the workspace and
+/// return their workspace-relative path. The SPA references that path in the chat
+/// message instead of inlining base64, so the agent reads the image via its Read
+/// tool. The destination always stays inside `UPLOAD_DIR` (the name is sanitized
+/// to a basename, so it can't traverse out).
+async fn upload_handler(
+    Query(q): Query<UploadQuery>,
+    State(state): State<AppState>,
+    body: Bytes,
+) -> Response {
+    if body.is_empty() {
+        return (StatusCode::BAD_REQUEST, "empty upload").into_response();
+    }
+    let dir = state.root.join(UPLOAD_DIR);
+    if let Err(err) = std::fs::create_dir_all(&dir) {
+        tracing::warn!(%err, "upload: create dir failed");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "upload failed").into_response();
+    }
+    let filename = unique_upload_name(q.name.as_deref());
+    if let Err(err) = std::fs::write(dir.join(&filename), &body) {
+        tracing::warn!(%err, "upload: write failed");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "upload failed").into_response();
+    }
+    Json(UploadResult {
+        path: format!("{UPLOAD_DIR}/{filename}"),
+    })
+    .into_response()
+}
+
+/// A collision-proof, traversal-safe upload filename: a short random prefix plus
+/// the sanitized basename of the client's suggestion (extension preserved). Any
+/// character outside `[A-Za-z0-9._-]` becomes `-`, and path separators are dropped
+/// by taking the basename first — so the result is always a single path segment.
+fn unique_upload_name(suggested: Option<&str>) -> String {
+    let raw = suggested.unwrap_or("image");
+    let base = raw.rsplit(['/', '\\']).next().unwrap_or(raw);
+    let cleaned: String = base
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '-' })
+        .take(64)
+        .collect();
+    let safe = cleaned.trim_matches('.');
+    let safe = if safe.is_empty() { "image" } else { safe };
+    let prefix = uuid::Uuid::new_v4().simple().to_string();
+    format!("{}-{safe}", &prefix[..8])
 }
 
 fn forbidden(reason: &str) -> Response {
