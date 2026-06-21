@@ -99,8 +99,11 @@ function isCollapsed(node) {
 .row:hover {
   background: rgba(255, 255, 255, 0.05);
 }
-/* File rows are a flex container: a stretchable name button + trailing icons. */
+/* File rows host a full-width name button; the action icons float over the row's
+   right edge (position:absolute) so they never steal layout width from the name —
+   long filenames keep the whole row and ellipsize instead of being cropped. */
 .row.file {
+  position: relative;
   padding: 0;
 }
 .name-btn {
@@ -127,10 +130,31 @@ function isCollapsed(node) {
   color: var(--tool-accent);
 }
 .actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
+  align-items: center;
   gap: 0.1rem;
-  padding-right: 0.45rem;
+  padding: 0 0.45rem 0 1.5rem;
   opacity: 0;
+  /* Fade the row text out under the icons rather than hard-clipping it. */
+  background: linear-gradient(to right, transparent, var(--tool-panel) 1.2rem);
+}
+.file.active .actions {
+  background: linear-gradient(
+    to right,
+    transparent,
+    color-mix(in srgb, var(--tool-accent) 14%, var(--tool-panel)) 1.2rem
+  );
+}
+.row.file:hover .actions {
+  background: linear-gradient(
+    to right,
+    transparent,
+    color-mix(in srgb, #fff 5%, var(--tool-panel)) 1.2rem
+  );
 }
 .row.file:hover .actions,
 .file.active .actions {

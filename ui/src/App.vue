@@ -22,6 +22,84 @@ const previewView = ref("web"); // web | source | console
 const railCollapsed = ref(false);
 const chatWide = ref(false);
 
+// ---- Resizable Files / Chat rails ----
+// The grid columns are driven by --rail-w / --chat-w. We apply user-dragged
+// widths inline on .zones, but only while the matching collapse/expand toggle is
+// off — so a collapsed rail (46px) or an expanded chat (560px) class still wins.
+// Widths persist across reloads in localStorage.
+const RAIL_DEFAULT = 216;
+const CHAT_DEFAULT = 360;
+function storedW(key, fallback) {
+  const v = Number(localStorage.getItem(key));
+  return v > 0 ? v : fallback;
+}
+const railW = ref(storedW("design.railW", RAIL_DEFAULT));
+const chatW = ref(storedW("design.chatW", CHAT_DEFAULT));
+const dragging = ref(false);
+
+const zonesStyle = computed(() => {
+  const s = {};
+  if (!railCollapsed.value) s["--rail-w"] = `${railW.value}px`;
+  if (!chatWide.value) s["--chat-w"] = `${chatW.value}px`;
+  return s;
+});
+
+function clamp(v, lo, hi) {
+  return Math.min(hi, Math.max(lo, v));
+}
+
+let dragKind = null;
+let dragStartX = 0;
+let dragStartW = 0;
+function startDrag(kind, e) {
+  dragKind = kind;
+  dragStartX = e.clientX;
+  if (kind === "rail") {
+    railCollapsed.value = false; // a drag implies "show me the rail"
+    dragStartW = railW.value;
+  } else {
+    chatWide.value = false;
+    dragStartW = chatW.value;
+  }
+  dragging.value = true;
+  e.target.setPointerCapture(e.pointerId); // keep events even over the iframe
+  e.target.addEventListener("pointermove", onDrag);
+  e.target.addEventListener("pointerup", endDrag);
+}
+function onDrag(e) {
+  const dx = e.clientX - dragStartX;
+  if (dragKind === "rail") {
+    railW.value = clamp(dragStartW + dx, 140, 480);
+  } else {
+    // The chat handle sits on the chat's left border, so dragging left widens it.
+    chatW.value = clamp(dragStartW - dx, 280, 760);
+  }
+}
+function endDrag(e) {
+  dragging.value = false;
+  dragKind = null;
+  e.target.removeEventListener("pointermove", onDrag);
+  e.target.removeEventListener("pointerup", endDrag);
+  localStorage.setItem("design.railW", String(railW.value));
+  localStorage.setItem("design.chatW", String(chatW.value));
+}
+
+// Pop the live preview into its own browser window. `previewSrc` is the
+// same-origin /raw/ URL, so the launch token's Strict cookie carries with it.
+function popOut() {
+  window.open(previewSrc.value, "_blank", "noopener");
+}
+
+// Rebuild the substrate via the workspace Console (reuses the console.run WS op —
+// no backend logic). Switch to the console to show progress; when the build
+// process exits we refresh the live preview so it picks up the new output.
+const building = ref(false);
+function rebuild() {
+  agentClient.consoleRun("npm run build");
+  previewView.value = "console";
+  building.value = true;
+}
+
 // Device-frame controls (web view only).
 const device = ref("desktop");
 const touch = ref(false);
@@ -437,6 +515,13 @@ watch(
 onMounted(() => {
   loadTree();
   agentClient.connect();
+  // When a rebuild we launched finishes, drop the flag and refresh the preview.
+  agentClient.onConsole((frame) => {
+    if (frame.op === "console.exit" && building.value) {
+      building.value = false;
+      refreshPreview();
+    }
+  });
 });
 </script>
 
@@ -459,7 +544,11 @@ onMounted(() => {
       </span>
     </header>
 
-    <div class="zones" :class="{ 'rail-collapsed': railCollapsed, 'chat-wide': chatWide }">
+    <div
+      class="zones"
+      :class="{ 'rail-collapsed': railCollapsed, 'chat-wide': chatWide, dragging }"
+      :style="zonesStyle"
+    >
       <!-- Files (thin, collapsible) -->
       <section class="zone files-zone">
         <div class="zone-head">
@@ -494,6 +583,18 @@ onMounted(() => {
 
       <!-- Preview (web / source / console) -->
       <section class="zone preview-zone">
+        <!-- Drag handles on the Files|Preview and Preview|Chat borders. -->
+        <div
+          v-if="!railCollapsed"
+          class="resize-handle left"
+          title="Drag to resize the Files rail"
+          @pointerdown.prevent="startDrag('rail', $event)"
+        />
+        <div
+          class="resize-handle right"
+          title="Drag to resize the Chat panel"
+          @pointerdown.prevent="startDrag('chat', $event)"
+        />
         <div class="zone-head">
           <div class="seg">
             <button :class="{ on: previewView === 'web' }" @click="previewView = 'web'">web</button>
@@ -533,6 +634,15 @@ onMounted(() => {
               ⌖
             </button>
             <button class="icon-btn" title="Reload preview" @click="refreshPreview">⟳</button>
+            <button
+              class="icon-btn"
+              :class="{ on: building }"
+              title="Rebuild (npm run build) then refresh the preview"
+              @click="rebuild"
+            >
+              ⚒
+            </button>
+            <button class="icon-btn" title="Open preview in a new window" @click="popOut">⧉</button>
           </template>
           <span v-else-if="previewView === 'source'" class="src-path">
             {{ selectedPath || "no file selected" }}
@@ -744,6 +854,32 @@ onMounted(() => {
 .zones.chat-wide {
   --chat-w: 560px;
 }
+/* Suspend the column transition while dragging so the rail tracks the cursor. */
+.zones.dragging {
+  transition: none;
+  cursor: col-resize;
+  user-select: none;
+}
+/* Thin grab strips straddling the Preview center's left/right borders. They sit
+   above the iframe so the pointer never falls through to it mid-drag. */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  z-index: 5;
+  cursor: col-resize;
+}
+.resize-handle.left {
+  left: -4px;
+}
+.resize-handle.right {
+  right: -4px;
+}
+.resize-handle:hover,
+.zones.dragging .resize-handle {
+  background: color-mix(in srgb, var(--tool-accent) 40%, transparent);
+}
 .zone {
   min-width: 0;
   min-height: 0;
@@ -811,6 +947,7 @@ onMounted(() => {
 
 /* ── Preview center ────────────────────────────────────────── */
 .preview-zone {
+  position: relative;
   background: var(--tool-bg);
 }
 .seg {

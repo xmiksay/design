@@ -54,7 +54,9 @@ const queued = ref([]);
 const tasks = ref([]); // [string]
 const colors = ref([]); // [{ color, desc }]
 const inspections = ref([]); // [{ value, desc }]
+const images = ref([]); // [{ name, mediaType, dataB64 }] — sent as image content blocks
 const showOptions = ref(false);
+const imageInput = ref(null);
 
 // Pending inputs for the "add" rows in the option panel.
 const taskInput = ref("");
@@ -69,12 +71,53 @@ const inspectDescField = ref(null); // the description <input>, focused on a pic
 const pendingInspection = ref("");
 
 const optionCount = computed(
-  () => tasks.value.length + colors.value.length + inspections.value.length,
+  () =>
+    tasks.value.length + colors.value.length + inspections.value.length + images.value.length,
 );
 
 // The send buttons activate when there's *anything* to send — free text or any
-// attached option.
+// attached option/image.
 const hasContent = computed(() => !!draft.value.trim() || optionCount.value > 0);
+
+// Read an image File into a raw base64 string (+ media type) for an image content
+// block. The data URL prefix (`data:<mime>;base64,`) is stripped — Claude Code's
+// stream-json input wants the bare base64 payload.
+function addImage(file) {
+  if (!file || !file.type.startsWith("image/")) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const url = String(reader.result);
+    const comma = url.indexOf(",");
+    if (comma < 0) return;
+    images.value.push({
+      name: file.name || "pasted-image",
+      mediaType: file.type,
+      dataB64: url.slice(comma + 1),
+    });
+  };
+  reader.readAsDataURL(file);
+}
+function onPickImages(e) {
+  for (const f of e.target.files ?? []) addImage(f);
+  e.target.value = ""; // let the same file be picked again
+}
+// Pasting an image anywhere in the composer adds it just like the file picker.
+function onPaste(e) {
+  let handled = false;
+  for (const it of e.clipboardData?.items ?? []) {
+    if (it.kind === "file" && it.type.startsWith("image/")) {
+      const f = it.getAsFile();
+      if (f) {
+        addImage(f);
+        handled = true;
+      }
+    }
+  }
+  if (handled) {
+    e.preventDefault();
+    showOptions.value = true; // reveal the thumbnails so the paste is visible
+  }
+}
 
 function addTask() {
   const t = taskInput.value.trim();
@@ -103,6 +146,7 @@ function clearOptions() {
   tasks.value = [];
   colors.value = [];
   inspections.value = [];
+  images.value = [];
   pendingInspection.value = "";
 }
 
@@ -197,7 +241,21 @@ function parseStreamJson(msg) {
           // control_request (which carries the request_id we answer on); skip
           // the generic tool entry so we don't show it twice.
           if (b.name === "AskUserQuestion") continue;
-          push({ kind: "tool", id: b.id, name: b.name, input: b.input ?? {}, open: false });
+          // ExitPlanMode is the agent presenting its plan — surface it as a
+          // prominent rendered-markdown card rather than a raw tool blob. The
+          // follow-up permission prompt still renders its own approve/deny.
+          if (b.name === "ExitPlanMode") {
+            push({ kind: "plan", text: b.input?.plan ?? "" });
+            continue;
+          }
+          push({
+            kind: "tool",
+            id: b.id,
+            name: b.name,
+            input: b.input ?? {},
+            summary: toolSummary(b.name, b.input ?? {}),
+            open: false,
+          });
         }
       }
       break;
@@ -211,6 +269,10 @@ function parseStreamJson(msg) {
         break;
       }
       if (Array.isArray(blocks)) {
+        // A user message is either tool_results or a real user turn (text +
+        // images). Collect the latter so the turn renders as one bubble.
+        const texts = [];
+        const imgs = [];
         for (const b of blocks) {
           if (b.type === "tool_result") {
             // A tool_result for an outstanding question/permission means it was
@@ -234,9 +296,12 @@ function parseStreamJson(msg) {
               open: false,
             });
           } else if (b.type === "text" && b.text) {
-            pushUserText(b.text);
+            texts.push(b.text);
+          } else if (b.type === "image" && b.source?.type === "base64") {
+            imgs.push({ mediaType: b.source.media_type, dataB64: b.source.data });
           }
         }
+        if (texts.length || imgs.length) pushUserText(texts.join("\n"), imgs);
       }
       break;
     }
@@ -279,8 +344,18 @@ function parseStreamJson(msg) {
       busy.value = false;
       break;
 
+    case "stream_event":
+      break; // partial deltas — the full assistant/user messages are authoritative
+
+    case "rate_limit_event":
+      push({ kind: "system", text: "⏳ rate limit event" });
+      break;
+
     default:
-      break; // rate_limit_event, stream_event (partials), system/status: ignored
+      // Don't silently drop anything else: show it as a muted, collapsed blob so
+      // unexpected message types are at least visible/inspectable.
+      push({ kind: "unknown", typeName: msg.type ?? "message", text: prettyInput(msg) });
+      break;
   }
 }
 
@@ -305,26 +380,35 @@ function contentToText(content) {
 //    kept), THEN send the user message so it redirects the CURRENT flow.
 // Send a user message and show it immediately as a queued bubble. It promotes to
 // a real bubble once the agent echoes the turn back (see pushUserText).
-function postMessage(text) {
+function postMessage(text, imgs = []) {
+  const content = [];
+  if (text) content.push({ type: "text", text });
+  for (const img of imgs) {
+    content.push({
+      type: "image",
+      source: { type: "base64", media_type: img.mediaType, data: img.dataB64 },
+    });
+  }
   agentClient.input(props.agentId, {
     type: "user",
-    message: { role: "user", content: [{ type: "text", text }] },
+    message: { role: "user", content },
   });
-  queued.value.push(text);
+  queued.value.push({ text, images: imgs.slice() });
   scrollDown();
 }
 
 // The agent echoed a user turn back — it has picked the message up. Drop the
-// oldest queued bubble (FIFO) and render this one for real.
-function pushUserText(text) {
-  if (queued.value.length) queued.value.shift();
-  push({ kind: "user", text });
+// oldest queued bubble (FIFO) and render this one for real, preferring the
+// locally-captured images (full fidelity) over any echoed back in the turn.
+function pushUserText(text, imgs = []) {
+  const q = queued.value.length ? queued.value.shift() : null;
+  push({ kind: "user", text, images: q?.images?.length ? q.images : imgs });
 }
 
 function sendDraft() {
   if (!hasContent.value) return;
   const text = buildMessage();
-  postMessage(text);
+  postMessage(text, images.value.slice());
   draft.value = "";
   clearOptions();
   busy.value = true;
@@ -333,8 +417,9 @@ function sendDraft() {
 function steerDraft() {
   if (!hasContent.value || !busy.value) return;
   const text = buildMessage();
+  const imgs = images.value.slice();
   sendInterrupt();
-  postMessage(text);
+  postMessage(text, imgs);
   draft.value = "";
   clearOptions();
   // Still busy: the interrupt's `result` plus the new turn keep the agent working.
@@ -482,6 +567,60 @@ function highlightCmd(cmd) {
   }
 }
 
+// ---- Tool summaries ----
+// Common tools read far better as a concise header + shaped body than as raw
+// JSON. `toolSummary` maps a tool's (name, input) to { head, body, diff }:
+//   head  — the summary line shown in the <details> summary (icon + tool + target)
+//   body  — preformatted detail for the <pre>, or null to fall back to prettyInput
+//   diff  — true when `body` is a +/- diff that should render with line coloring
+const TOOL_ICONS = {
+  Read: "📖", Edit: "✏️", MultiEdit: "✏️", Write: "📝", NotebookEdit: "✏️",
+  Glob: "🔍", Grep: "🔍", LS: "📂", TodoWrite: "✅",
+  WebFetch: "🌐", WebSearch: "🌐", Task: "🤖",
+};
+function basename(p) {
+  if (typeof p !== "string") return "";
+  const parts = p.split("/").filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : p;
+}
+function diffBody(oldStr, newStr) {
+  const minus = (oldStr ?? "").split("\n").map((l) => `- ${l}`).join("\n");
+  const plus = (newStr ?? "").split("\n").map((l) => `+ ${l}`).join("\n");
+  return `${minus}\n${plus}`;
+}
+function toolSummary(name, input) {
+  const i = input ?? {};
+  const icon = TOOL_ICONS[name] ?? "🔧";
+  const head = (suffix) => `${icon} ${name}${suffix ? ` ${suffix}` : ""}`;
+  switch (name) {
+    case "Read":
+    case "NotebookEdit":
+      return { head: head(basename(i.file_path ?? i.notebook_path)), body: null, diff: false };
+    case "Write":
+      return { head: head(basename(i.file_path)), body: i.content ?? null, diff: false };
+    case "Edit":
+      return { head: head(basename(i.file_path)), body: diffBody(i.old_string, i.new_string), diff: true };
+    case "MultiEdit": {
+      const edits = Array.isArray(i.edits) ? i.edits : [];
+      const body = edits.map((e) => diffBody(e.old_string, e.new_string)).join("\n\n");
+      return { head: head(`${basename(i.file_path)} · ${edits.length} edit${edits.length === 1 ? "" : "s"}`), body: body || null, diff: true };
+    }
+    case "Glob":
+    case "Grep":
+      return { head: head(i.pattern), body: i.path ? `in ${i.path}` : null, diff: false };
+    case "LS":
+      return { head: head(i.path ? basename(i.path) : ""), body: null, diff: false };
+    case "TodoWrite": {
+      const todos = Array.isArray(i.todos) ? i.todos : [];
+      const mark = { completed: "✓", in_progress: "▶", pending: "○" };
+      const body = todos.map((t) => `${mark[t.status] ?? "○"} ${t.content}`).join("\n");
+      return { head: head(`${todos.length} item${todos.length === 1 ? "" : "s"}`), body: body || null, diff: false };
+    }
+    default:
+      return { head: head(""), body: null, diff: false };
+  }
+}
+
 // ---- lifecycle: subscribe BEFORE attach so we catch the history replay ----
 
 function bind(id) {
@@ -506,7 +645,16 @@ onBeforeUnmount(() => {
     <div ref="scroller" class="messages">
       <div v-for="(e, i) in entries" :key="i" class="msg" :class="e.kind">
         <template v-if="e.kind === 'user'">
-          <div class="bubble user markdown" v-html="renderMarkdown(e.text)" />
+          <div v-if="e.text" class="bubble user markdown" v-html="renderMarkdown(e.text)" />
+          <div v-if="e.images && e.images.length" class="bubble-images">
+            <img
+              v-for="(img, ii) in e.images"
+              :key="ii"
+              class="bubble-image"
+              :src="`data:${img.mediaType};base64,${img.dataB64}`"
+              :alt="img.name || 'image'"
+            />
+          </div>
         </template>
 
         <template v-else-if="e.kind === 'assistant'">
@@ -522,13 +670,36 @@ onBeforeUnmount(() => {
 
         <template v-else-if="e.kind === 'tool'">
           <details class="tool">
-            <summary><span class="tool-name">🔧 {{ e.name }}</span></summary>
+            <summary><span class="tool-name">{{ e.summary?.head || `🔧 ${e.name}` }}</span></summary>
             <div v-if="e.input.description" class="tool-desc">{{ e.input.description }}</div>
             <template v-if="cmdOf(e.input)">
               <pre class="cmd"><code class="hljs language-bash" v-html="highlightCmd(cmdOf(e.input))" /></pre>
               <pre v-if="restOf(e.input, ['command', 'description'])">{{ prettyInput(restOf(e.input, ['command', 'description'])) }}</pre>
             </template>
+            <div v-else-if="e.summary?.diff" class="diff">
+              <div
+                v-for="(ln, li) in e.summary.body.split('\n')"
+                :key="li"
+                class="diff-line"
+                :class="ln.startsWith('+') ? 'add' : ln.startsWith('-') ? 'del' : ''"
+              >{{ ln || " " }}</div>
+            </div>
+            <pre v-else-if="e.summary && e.summary.body != null">{{ e.summary.body }}</pre>
             <pre v-else>{{ prettyInput(e.input) }}</pre>
+          </details>
+        </template>
+
+        <template v-else-if="e.kind === 'plan'">
+          <div class="plan">
+            <div class="plan-head">📋 Plan</div>
+            <div class="plan-body markdown" v-html="renderMarkdown(e.text)" />
+          </div>
+        </template>
+
+        <template v-else-if="e.kind === 'unknown'">
+          <details class="tool">
+            <summary><span class="tool-name">⋯ {{ e.typeName }}</span></summary>
+            <pre>{{ e.text }}</pre>
           </details>
         </template>
 
@@ -609,7 +780,16 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-for="(q, i) in queued" :key="`q${i}`" class="msg queued">
-        <div class="bubble queued-bubble markdown" v-html="renderMarkdown(q)" />
+        <div v-if="q.text" class="bubble queued-bubble markdown" v-html="renderMarkdown(q.text)" />
+        <div v-if="q.images && q.images.length" class="bubble-images">
+          <img
+            v-for="(img, ii) in q.images"
+            :key="ii"
+            class="bubble-image"
+            :src="`data:${img.mediaType};base64,${img.dataB64}`"
+            :alt="img.name || 'image'"
+          />
+        </div>
         <div class="queued-tag">queued · waiting for agent</div>
       </div>
 
@@ -712,6 +892,28 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
+
+          <!-- Images -->
+          <div class="opt-group">
+            <div class="opt-label">Images</div>
+            <ul v-if="images.length" class="opt-thumbs">
+              <li v-for="(img, i) in images" :key="i" class="opt-thumb">
+                <img :src="`data:${img.mediaType};base64,${img.dataB64}`" :alt="img.name" />
+                <button type="button" class="opt-thumb-remove" title="Remove" @click="images.splice(i, 1)">×</button>
+              </li>
+            </ul>
+            <div class="opt-add">
+              <input
+                ref="imageInput"
+                class="opt-file"
+                type="file"
+                accept="image/*"
+                multiple
+                @change="onPickImages"
+              />
+            </div>
+            <p class="opt-hint">Pick files, or paste an image into the message box.</p>
+          </div>
         </div>
       </div>
 
@@ -722,6 +924,7 @@ onBeforeUnmount(() => {
         rows="3"
         placeholder="Message the agent…  (Enter to send, Shift+Enter for newline)"
         @keydown.enter.exact.prevent="sendDraft"
+        @paste="onPaste"
       />
       <div class="composer-actions">
         <button v-if="busy" class="stop" type="button" @click="stop">■ Stop</button>
@@ -944,6 +1147,74 @@ onBeforeUnmount(() => {
   font-family: var(--tool-mono);
   font-size: 0.74rem;
   line-height: 1.45;
+}
+/* A +/- diff body for Edit/MultiEdit, colored per line. */
+.diff {
+  margin: 0.25rem 0 0;
+  padding: 0.5rem;
+  background: var(--tool-bg);
+  border: 1px solid var(--tool-border);
+  border-radius: 6px;
+  font-family: var(--tool-mono);
+  font-size: 0.74rem;
+  line-height: 1.4;
+  max-height: 16rem;
+  overflow: auto;
+}
+.diff-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--tool-muted);
+}
+.diff-line.add {
+  color: var(--tool-accent);
+  background: color-mix(in srgb, var(--tool-accent) 12%, transparent);
+}
+.diff-line.del {
+  color: var(--tool-danger);
+  background: color-mix(in srgb, var(--tool-danger) 12%, transparent);
+}
+
+/* ── Plan card (ExitPlanMode) ──────────────────────────────── */
+.plan {
+  align-self: stretch;
+  border: 1px solid var(--tool-accent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--tool-accent) 7%, var(--tool-panel));
+  overflow: hidden;
+}
+.plan-head {
+  padding: 0.4rem 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--tool-accent);
+  border-bottom: 1px solid color-mix(in srgb, var(--tool-accent) 30%, transparent);
+}
+.plan-body {
+  padding: 0.6rem 0.75rem;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: var(--tool-text);
+}
+
+/* ── Attached images (user + queued bubbles) ───────────────── */
+.bubble-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.3rem;
+  align-self: flex-end;
+}
+.msg.queued .bubble-images {
+  align-self: flex-end;
+}
+.bubble-image {
+  max-width: 160px;
+  max-height: 160px;
+  border-radius: 8px;
+  border: 1px solid var(--tool-border);
+  object-fit: cover;
 }
 .tool-result.err summary {
   color: var(--tool-danger);
@@ -1312,6 +1583,52 @@ onBeforeUnmount(() => {
   border: 1px solid var(--tool-border);
   border-radius: 6px;
   cursor: pointer;
+}
+.opt-thumbs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.opt-thumb {
+  position: relative;
+  width: 56px;
+  height: 56px;
+}
+.opt-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--tool-border);
+}
+.opt-thumb-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: var(--tool-danger);
+  color: var(--tool-accent-ink);
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.opt-file {
+  flex: 1;
+  min-width: 0;
+  color: var(--tool-muted);
+  font-family: var(--tool-sans);
+  font-size: 0.74rem;
+}
+.opt-hint {
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--tool-muted);
 }
 .opt-add-btn {
   flex: none;
